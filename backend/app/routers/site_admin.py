@@ -665,7 +665,10 @@ def patch_workspace(
 # accepted (forward compatibility) but not listed in GET defaults.
 SETTING_DEFAULTS: dict[str, dict[str, Any]] = {
     "registration_open": {"value": True, "description": "Allow new account sign-ups"},
-    "default_role": {"value": "viewer", "description": "Seat granted to new sign-ups"},
+    # An organisation joining the platform to have its operation managed here
+    # must own its workspace from the first minute; a viewer seat would leave
+    # the first user unable to create even a location (RBAC blocks writes).
+    "default_role": {"value": "owner", "description": "Seat granted to new sign-ups (owner by default)"},
     "announcement": {
         "value": "",
         "description": "Banner text shown to every signed-in user ('' = none)",
