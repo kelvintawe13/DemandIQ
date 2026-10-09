@@ -5,7 +5,6 @@ import {
   LockIcon,
   EyeIcon,
   EyeOffIcon,
-  BriefcaseIcon,
   StoreIcon,
   MapPinIcon,
   UsersIcon,
@@ -25,8 +24,7 @@ import {
   coverBands,
   dataSources,
   locationCounts,
-  passwordScore,
-  roles } from
+  passwordScore } from
 '../../data/signupOptions';
 import { api, ApiException } from '../../api/client';
 import type { DemoAccount } from '../../data/demoAccount';
@@ -44,7 +42,6 @@ interface SignUpProps {
 interface FormErrors {
   name?: string;
   email?: string;
-  role?: string;
   password?: string;
   confirm?: string;
   business?: string;
@@ -76,14 +73,6 @@ function mapDailyCovers(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function mapFrontendRole(frontRole: string): string {
-  const r = frontRole.toLowerCase();
-  if (r === 'owner') return 'owner';
-  if (r === 'analyst') return 'analyst';
-  if (r === 'operations' || r === 'chef') return 'operator';
-  return 'viewer';
-}
-
 export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpProps) {
   const { openLegal } = useLegal();
   const { toast } = useToast();
@@ -92,7 +81,6 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
   // Step 1 — who is signing up
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -167,10 +155,8 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
   const submitStepOne = (event: React.FormEvent) => {
     event.preventDefault();
     const next: FormErrors = {};
-    if (name.trim().length < 2) next.name = 'Enter your full name.';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    next.email = 'Enter a valid work email address.';
-    if (!role) next.role = 'Select your role.';
+    if (name.trim().length < 2) next.name = 'Enter your full name.';    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      next.email = 'Enter a valid work email address.';
     if (password.length < 8) next.password = 'Use at least 8 characters.';
     if (confirm !== password) next.confirm = 'Passwords do not match.';
 
@@ -205,7 +191,6 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
-        role: mapFrontendRole(role),
         business_name: business.trim(),
         business_type: businessType || undefined,
         location_count: mapLocationCount(locations),
@@ -235,7 +220,6 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
             business_type: 'businessType',
             location_count: 'locations',
             data_sources: 'sources',
-            role: 'role',
           };
           const key = map[field] ?? (field as keyof FormErrors);
           setErrors((prev) => ({ ...prev, [key]: e.error.message }));
@@ -347,16 +331,6 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
           icon={MailIcon}
           autoComplete="email"
           error={errors.email} />
-        
-          <AuthSelect
-          id="signup-role"
-          label="Your role"
-          value={role}
-          onChange={setRole}
-          options={roles}
-          placeholder="Select your role"
-          icon={BriefcaseIcon}
-          error={errors.role} />
         
           <div>
             <AuthField
