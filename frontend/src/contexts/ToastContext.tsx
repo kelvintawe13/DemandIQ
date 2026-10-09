@@ -63,7 +63,7 @@ export function ToastProvider({ children }: {children: React.ReactNode;}) {
               role="alert"
               aria-live="assertive"
               aria-atomic="true"
-              className="pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+              className="toast-in pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
               
               <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${className}`} strokeWidth={2} />
               <p className="min-w-0 flex-1 text-meta leading-relaxed text-slate-700 dark:text-slate-200">

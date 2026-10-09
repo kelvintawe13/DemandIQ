@@ -20,6 +20,12 @@ class Workspace(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     business_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The signup profile (019): what the organisation told us at registration.
+    # Nullable because only new sign-ups supply them; nothing is back-filled
+    # with a guess. ``data_sources`` is a list of source ids from the form.
+    location_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_covers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    data_sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     country: Mapped[str] = mapped_column(Text, nullable=False, default="RW")
     timezone: Mapped[str] = mapped_column(Text, nullable=False, default="Africa/Kigali")
     created_at: Mapped[datetime.datetime] = mapped_column(

@@ -47,10 +47,10 @@ const navGhost =
 'rounded-lg px-3 py-2 text-body-sm font-semibold text-slate-700 transition-colors duration-150 ease-out hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 whitespace-nowrap';
 
 const navPrimary =
-'inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 whitespace-nowrap';
+'btn-rail inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 whitespace-nowrap';
 
 const btnPrimary =
-'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-5 py-3 text-body-sm font-semibold text-white shadow-lift transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
+'btn-rail inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-5 py-3 text-body-sm font-semibold text-white shadow-lift transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
 
 const btnGhost =
 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-body-sm font-semibold text-slate-700 transition-[background-color,border-color,transform] duration-150 ease-out hover:border-slate-400 hover:bg-slate-50 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
