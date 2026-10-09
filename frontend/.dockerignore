@@ -1,0 +1,39 @@
+# Build context for the DEV frontend image only (frontend/Dockerfile.dev, built
+# with `context: ./frontend`).
+#
+# The production image builds from the repository ROOT and is governed by the
+# root .dockerignore instead. Two files, because a .dockerignore only ever
+# applies to the context it sits in.
+#
+# The critical entry is node_modules: the host's install is platform-specific
+# (macOS binaries, and a hoisted npm-workspace layout rooted one level up) and
+# must never be copied into a Linux image. compose also masks it with an
+# anonymous volume, so a stale copy cannot shadow the image's own install.
+
+node_modules/
+dist/
+.vite/
+
+# Secrets: the dev image gets its configuration from compose `environment`.
+# vite auto-loads a .env from the build context, so leaving the host's in place
+# would let a developer's local VITE_API_URL silently win over the composed one.
+.env
+.env.*
+*.env
+*.env.*
+!**/.env.example
+
+# Test/coverage output
+coverage/
+.vitest/
+playwright-report/
+test-results/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.log
+npm-debug.log*

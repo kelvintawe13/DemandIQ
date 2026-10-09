@@ -1,0 +1,100 @@
+<!doctype html>
+<!-- `dark` is the platform default, set here so the first paint is dark before
+     React mounts; ThemeContext corrects it for anyone with a stored light
+     preference. -->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0f6d67" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a1f1d" media="(prefers-color-scheme: dark)" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="application-name" content="DemandIQ" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="DemandIQ" />
+
+    <!-- SEO (primary). JS overrides per-route via useDocumentTitle. -->
+    <title>DemandIQ · Explainable Demand Forecasting for Food-Waste Prevention</title>
+    <meta name="title" content="DemandIQ · Explainable ML Decision-Support for Restaurant Demand Forecasting" />
+    <meta
+      name="description"
+      content="Explainable ML decision-support for restaurant demand forecasting (LightGBM/CatBoost vs baselines, adaptive conformal prediction, SHAP) and preparation-policy simulation (SR/PS/UD) under public-data constraints, using Recruit (252k obs) and URBAN-WASTE (CC BY 4.0). BSc Software Engineering, African Leadership University (Kelvin Tawe, 2026)."
+    />
+    <meta name="author" content="Kelvin Tawe, African Leadership University" />
+    <meta
+      name="keywords"
+      content="demand forecasting, food waste prevention, machine learning, explainable AI, LightGBM, CatBoost, XGBoost, Random Forest, conformal prediction, SHAP, Recruit dataset, URBAN-WASTE, restaurant, decision support, ALU"
+    />
+    <link rel="canonical" href="https://demandiq.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DemandIQ" />
+    <meta property="og:url" content="https://demandiq.app/" />
+    <meta property="og:title" content="DemandIQ · Explainable Demand Forecasting & Food-Waste Prevention" />
+    <meta
+      property="og:description"
+      content="Forecast daily visitor demand, quantify uncertainty with adaptive conformal prediction, compare preparation policies (SR/PS/UD), and contextualize with independent URBAN-WASTE evidence (no row-level merge)."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_RW" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="DemandIQ · Explainable Demand Forecasting" />
+    <meta
+      name="twitter:description"
+      content="LightGBM/CatBoost + baselines, MAE/RMSE/RMSLE, SHAP explanations, and policy simulation in a reproducible public-data framework."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <!-- Academic / provenance -->
+    <meta name="citation_title" content="An Explainable Machine-Learning Decision-Support Framework for Restaurant Demand Forecasting and Food-Waste Prevention Under Public-Data Constraints" />
+    <meta name="citation_author" content="Kelvin Tawe" />
+    <meta name="citation_publication_date" content="2026-09-18" />
+    <meta name="dcterms.rights" content="Recruit: Kaggle competition academic/research use; URBAN-WASTE: CC BY 4.0 (Eriksson & Lindgren, 2019)" />
+
+    <!-- Performance: preconnect early, dns-prefetch + preconnect for fonts and API -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+
+    <!-- Icons / PWA -->
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" sizes="any" />
+    <link rel="apple-touch-icon" href="/vite.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Preload critical font to avoid FOIT (Inter) -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+    </noscript>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+    <noscript>
+      <div style="max-width: 520px; margin: 48px auto; padding: 24px; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; text-align: center; color: #334155;">
+        <h1 style="font-size: 22px; font-weight: 600; color: #0f172a;">DemandIQ requires JavaScript</h1>
+        <p style="margin-top: 8px; font-size: 14px; line-height: 1.6; color: #64748b;">
+          Forecasting, uncertainty intervals, and policy simulation are rendered client-side. Please enable JavaScript to continue.
+        </p>
+        <p style="margin-top: 12px; font-size: 12px; color: #94a3b8;">
+          Recruit 252k obs · URBAN-WASTE CC BY 4.0 · ALU 2026
+        </p>
+      </div>
+    </noscript>
+  </body>
+</html>

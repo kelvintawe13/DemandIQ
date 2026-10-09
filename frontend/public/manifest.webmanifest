@@ -1,0 +1,12 @@
+{
+  "name": "DemandIQ — Explainable Demand Forecasting",
+  "short_name": "DemandIQ",
+  "description": "Forecast daily visitor demand, quantify uncertainty, compare preparation policies (SR/PS/UD) — Recruit + URBAN-WASTE, ALU 2026",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f6d67",
+  "theme_color": "#0f6d67",
+  "icons": [
+    { "src": "/vite.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

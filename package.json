@@ -1,0 +1,67 @@
+{
+  "name": "demandiq",
+  "version": "1.0.0",
+  "description": "An Explainable Machine-Learning Decision-Support Framework for Restaurant Demand Forecasting and Food-Waste Prevention Under Public-Data Constraints — LightGBM/CatBoost + baselines, adaptive conformal prediction (Gibbs & Candès 2021), SHAP, policy simulation (SR/PS/UD), Recruit + URBAN-WASTE evidence boundary",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "python3.11 -m uvicorn app.main:app --reload --port 8000 --app-dir backend",
+    "build": "npm run build --workspace=frontend",
+    "lint": "npm run lint --workspace=frontend",
+    "test": "npm run test --workspace=frontend",
+    "clean": "npm run clean --workspace=frontend",
+    "install:all": "npm install && npm install --workspace=frontend",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "verify": "bash scripts/verify.sh",
+    "verify:backend": "python3.11 -m pytest backend -q && python3.11 -m ruff check backend/app && python3.11 -m mypy backend/app --ignore-missing-imports",
+    "sync:console": "python3.11 backend/scripts/sync_console.py",
+    "docker:config": "docker compose config --quiet",
+    "docker:lint": "python3.11 scripts/check_docker_context.py",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps",
+    "docker:stores": "docker compose up -d postgres redis",
+    "docker:dev": "docker compose --profile dev up -d --build",
+    "docker:worker": "docker compose --profile worker up -d",
+    "docker:migrate": "docker compose run --rm migrate",
+    "docker:db": "docker compose exec postgres psql -U demandiq -d demandiq",
+    "docker:clean": "docker compose down -v --remove-orphans"
+  },
+  "keywords": [
+    "demand-forecasting",
+    "food-waste-prevention",
+    "machine-learning",
+    "explainable-ai",
+    "lightgbm",
+    "catboost",
+    "xgboost",
+    "random-forest",
+    "conformal-prediction",
+    "shap",
+    "recruit-dataset",
+    "urban-waste",
+    "decision-support",
+    "restaurant",
+    "time-series"
+  ],
+  "author": "Kelvin Tawe <kelvin.tawe@alustudent.com> (African Leadership University, BSc Software Engineering, 2026)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kelvintawe12/DemandIQ"
+  },
+  "license": "PROPRIETARY",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.0"
+  }
+}

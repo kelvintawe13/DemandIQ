@@ -1,0 +1,30 @@
+# Development Dockerfile for Frontend — vite dev server with hot reload.
+#
+# This image is for the `dev` compose profile only. It serves unminified modules
+# on every reload and is not a deployable artefact; the production image is
+# frontend/Dockerfile (node build -> nginx).
+#
+# Reproducibility caveat, stated plainly: there is no frontend/package-lock.json
+# because dependencies are an npm workspace hoisted to the ROOT lockfile, which
+# is not visible from this build context. So this image runs `npm install` and
+# resolves ranges fresh, exactly like `make install-frontend`'s no-lockfile
+# fallback. Only the production build is locked. If you need a locked dev image,
+# build it from the repository root instead.
+FROM node:20-alpine
+
+WORKDIR /app
+
+# `playwright` is a devDependency; without this its postinstall pulls ~500MB of
+# browser binaries into the image on every build.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+COPY package*.json ./
+RUN npm install --no-audit --no-fund
+
+COPY . .
+
+EXPOSE 5173
+
+# --host 0.0.0.0 is what makes the server reachable from outside the container;
+# without it vite binds loopback only and the published port answers nothing.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

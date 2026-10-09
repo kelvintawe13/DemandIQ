@@ -1,0 +1,63 @@
+# Backend build context exclusions.
+#
+# The load-bearing rule here is `.env` below. The backend image is built with
+# `COPY . .`, and backend/.env is gitignored but was NOT ignored here — so the
+# image baked in JWT_SECRET, the TOTP issuer and the database password, and
+# every `docker history` / registry push leaked them. Docker contexts ignore
+# .gitignore, so this file has to repeat the rule. Keep it in sync with any new
+# secret file.
+
+# --- Secrets: never in an image layer ---
+# The `**/` forms are not redundant: a bare `.env` pattern only matches at the
+# context root, so a dotenv nested under migrations/ or app/ would slip through.
+.env
+.env.*
+**/.env
+**/.env.*
+*.env
+*.env.*
+secrets.env
+**/secrets.env
+*.pem
+*.key
+
+# --- Python build/test residue ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+# Stale packaging metadata: `pip install -e backend` leaves this behind, and an
+# egg-info baked into the image can shadow the metadata the build itself writes.
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.log
+
+# Tests and their fixtures are not needed at runtime; excluding them also keeps
+# test-only credentials and dumps out of the published image. CI runs pytest
+# from a checkout, not from this image.
+tests/
+scripts/auth_e2e.*
+scripts/ingest_e2e.*
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docs and local notes — not served by the app. `pyproject.toml` declares
+# `readme = "README.md"`, so that one file has to survive for the package build,
+# and it has to be anchored: an unanchored `!README.md` re-includes EVERY README
+# in the tree, including the ones inside .venv that the rules above excluded.
+*.md
+!/README.md

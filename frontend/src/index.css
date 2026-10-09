@@ -1,0 +1,1158 @@
+/* @import url() FONT IMPORTS MUST ALWAYS BE AT THE VERY TOP OF THIS FILE, ABOVE THE TAILWIND IMPORTS — DO NOT DELETE THIS COMMENT */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* CRITICAL: THE FOLLOWING TAILWIND IMPORTS MUST NEVER BE DELETED OR REORDERED — DO NOT DELETE THIS COMMENT */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* END TAILWIND IMPORTS — ALL OTHER CSS MUST GO BELOW THIS LINE */
+
+/* Color scheme mapping - dynamic brand colors based on color scheme */
+:root {
+  --brand-50: #f8fafc;
+  --brand-100: #f1f5f9;
+  --brand-200: #e2e8f0;
+  --brand-300: #cbd5e1;
+  --brand-400: #94a3b8;
+  --brand-500: #64748b;
+  --brand-600: #475569;
+  --brand-700: #334155;
+  --brand-800: #1e293b;
+  --brand-900: #0f172a;
+}
+
+.color-scheme-green {
+  --brand-50: #effbf8;
+  --brand-100: #d6f5ee;
+  --brand-200: #a9e9dd;
+  --brand-300: #6fd6c6;
+  --brand-400: #38bdaa;
+  --brand-500: #17a294;
+  --brand-600: #0d8379;
+  --brand-700: #0f6d67;
+  --brand-800: #115a56;
+  --brand-900: #124b48;
+}
+
+.color-scheme-blue {
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-200: #bfdbfe;
+  --brand-300: #93c5fd;
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-800: #1e40af;
+  --brand-900: #1e3a8a;
+}
+
+.color-scheme-yellow {
+  --brand-50: #fffbeb;
+  --brand-100: #fef3c7;
+  --brand-200: #fde68a;
+  --brand-300: #fcd34d;
+  --brand-400: #fbbf24;
+  --brand-500: #f59e0b;
+  --brand-600: #d97706;
+  --brand-700: #b45309;
+  --brand-800: #92400e;
+  --brand-900: #78350f;
+}
+
+.color-scheme-purple {
+  --brand-50: #faf5ff;
+  --brand-100: #f3e8ff;
+  --brand-200: #e9d5ff;
+  --brand-300: #d8b4fe;
+  --brand-400: #c084fc;
+  --brand-500: #a855f7;
+  --brand-600: #9333ea;
+  --brand-700: #7e22ce;
+  --brand-800: #6b21a8;
+  --brand-900: #581c87;
+}
+
+.color-scheme-orange {
+  --brand-50: #fff7ed;
+  --brand-100: #ffedd5;
+  --brand-200: #fed7aa;
+  --brand-300: #fdba74;
+  --brand-400: #fb923c;
+  --brand-500: #f97316;
+  --brand-600: #ea580c;
+  --brand-700: #c2410c;
+  --brand-800: #9a3412;
+  --brand-900: #7c2d12;
+}
+
+.color-scheme-red {
+  --brand-50: #fef2f2;
+  --brand-100: #fee2e2;
+  --brand-200: #fecaca;
+  --brand-300: #fca5a5;
+  --brand-400: #f87171;
+  --brand-500: #ef4444;
+  --brand-600: #dc2626;
+  --brand-700: #b91c1c;
+  --brand-800: #991b1b;
+  --brand-900: #7f1d1d;
+}
+
+.color-scheme-pink {
+  --brand-50: #fdf2f8;
+  --brand-100: #fce7f3;
+  --brand-200: #fbcfe8;
+  --brand-300: #f9a8d4;
+  --brand-400: #f472b6;
+  --brand-500: #ec4899;
+  --brand-600: #db2777;
+  --brand-700: #be185d;
+  --brand-800: #9d174d;
+  --brand-900: #831843;
+}
+
+/* Ocean — the default scheme. OKLCH hue 208, chroma 0.94. Steps 500/600/700
+   are painted as text in the app (6/93/96 call sites) so each clears 4.5:1 on
+   white; 600/700 also carry white label text as fills. */
+.color-scheme-ocean {
+  --brand-50: #e5f7f9;
+  --brand-100: #c9f1f8;
+  --brand-200: #a1e6f1;
+  --brand-300: #68d1e0;
+  --brand-400: #28aaba;
+  --brand-500: #007d8b;
+  --brand-600: #006a76;
+  --brand-700: #00545e;
+  --brand-800: #004047;
+  --brand-900: #002d33;
+}
+
+/* Map brand colors to CSS variables */
+.bg-brand-50 { background-color: var(--brand-50); }
+.bg-brand-100 { background-color: var(--brand-100); }
+.bg-brand-200 { background-color: var(--brand-200); }
+.bg-brand-300 { background-color: var(--brand-300); }
+.bg-brand-400 { background-color: var(--brand-400); }
+.bg-brand-500 { background-color: var(--brand-500); }
+.bg-brand-600 { background-color: var(--brand-600); }
+.bg-brand-700 { background-color: var(--brand-700); }
+.bg-brand-800 { background-color: var(--brand-800); }
+.bg-brand-900 { background-color: var(--brand-900); }
+
+.text-brand-50 { color: var(--brand-50); }
+/* Steps 100-300 are re-defined as translucent BACKGROUND tints in dark mode.
+   Pointing text at them made body copy render at ~1.8:1 on the dark brand
+   sections, so text reads a separate solid ramp (--brand-text-*) and only falls
+   back to the tint variable in light mode. */
+.text-brand-100 { color: var(--brand-text-100, var(--brand-100)); }
+.text-brand-200 { color: var(--brand-text-200, var(--brand-200)); }
+.text-brand-300 { color: var(--brand-text-300, var(--brand-300)); }
+.text-brand-400 { color: var(--brand-400); }
+.text-brand-500 { color: var(--brand-500); }
+.text-brand-600 { color: var(--brand-600); }
+.text-brand-700 { color: var(--brand-700); }
+.text-brand-800 { color: var(--brand-800); }
+.text-brand-900 { color: var(--brand-900); }
+
+.border-brand-50 { border-color: var(--brand-50); }
+.border-brand-100 { border-color: var(--brand-100); }
+.border-brand-200 { border-color: var(--brand-200); }
+.border-brand-300 { border-color: var(--brand-300); }
+.border-brand-400 { border-color: var(--brand-400); }
+.border-brand-500 { border-color: var(--brand-500); }
+.border-brand-600 { border-color: var(--brand-600); }
+.border-brand-700 { border-color: var(--brand-700); }
+.border-brand-800 { border-color: var(--brand-800); }
+.border-brand-900 { border-color: var(--brand-900); }
+
+.hover\:bg-brand-50:hover { background-color: var(--brand-50); }
+.hover\:bg-brand-100:hover { background-color: var(--brand-100); }
+.hover\:bg-brand-200:hover { background-color: var(--brand-200); }
+.hover\:bg-brand-300:hover { background-color: var(--brand-300); }
+.hover\:bg-brand-400:hover { background-color: var(--brand-400); }
+.hover\:bg-brand-500:hover { background-color: var(--brand-500); }
+.hover\:bg-brand-600:hover { background-color: var(--brand-600); }
+.hover\:bg-brand-700:hover { background-color: var(--brand-700); }
+.hover\:bg-brand-800:hover { background-color: var(--brand-800); }
+.hover\:bg-brand-900:hover { background-color: var(--brand-900); }
+
+.hover\:text-brand-50:hover { color: var(--brand-50); }
+.hover\:text-brand-100:hover { color: var(--brand-100); }
+.hover\:text-brand-200:hover { color: var(--brand-200); }
+.hover\:text-brand-300:hover { color: var(--brand-300); }
+.hover\:text-brand-400:hover { color: var(--brand-400); }
+.hover\:text-brand-500:hover { color: var(--brand-500); }
+.hover\:text-brand-600:hover { color: var(--brand-600); }
+.hover\:text-brand-700:hover { color: var(--brand-700); }
+.hover\:text-brand-800:hover { color: var(--brand-800); }
+.hover\:text-brand-900:hover { color: var(--brand-900); }
+
+.hover\:border-brand-50:hover { border-color: var(--brand-50); }
+.hover\:border-brand-100:hover { border-color: var(--brand-100); }
+.hover\:border-brand-200:hover { border-color: var(--brand-200); }
+.hover\:border-brand-300:hover { border-color: var(--brand-300); }
+.hover\:border-brand-400:hover { border-color: var(--brand-400); }
+.hover\:border-brand-500:hover { border-color: var(--brand-500); }
+.hover\:border-brand-600:hover { border-color: var(--brand-600); }
+.hover\:border-brand-700:hover { border-color: var(--brand-700); }
+.hover\:border-brand-800:hover { border-color: var(--brand-800); }
+.hover\:border-brand-900:hover { border-color: var(--brand-900); }
+
+/* `min-height`, not `height`: the authenticated shell is self-contained
+   (`.app-viewport` is 100dvh with its own `overflow-hidden`, and `<main>` is the
+   scroller), so nothing here needs to pin the document to one viewport. Pinning
+   `height: 100%` + `overflow: hidden` made the public landing page
+   unscrollable — 3629px of content sat in a 900px box with the rest clipped and
+   unreachable. Document-flow pages have to be able to grow and scroll. */
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+/* Element font defaults live in @layer base on purpose. Unlayered rules outrank
+   every Tailwind utility, which used to pin all headings to a 400-only serif at
+   weight 400 with -0.01em tracking — silently discarding the font-bold /
+   font-semibold on 55 headings and the per-size letter-spacing on the h1/h2/h3
+   scale entries. In base, those utilities win again. */
+@layer base {
+  body {
+    /* Inter for body copy and UI. System stack behind it so the swap frame
+       never shows a serif/Times flash. */
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.5;
+    letter-spacing: normal;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Font family only. Weight, line-height and tracking are left to the
+     semantic scale (text-h1 / text-h2 / text-h3) and to weight utilities, so
+     this rule cannot flatten them. */
+  .font-display,
+  h1,
+  h2,
+  h3 {
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-weight: 600;
+  }
+  /* Serif display faces feel cramped in form boxes — keep controls on a UI face. */
+  input,
+  select,
+  textarea,
+  option {
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif !important;
+    font-weight: 400;
+    letter-spacing: normal;
+    line-height: 1.4;
+  }
+}
+
+/* Soft title entrance (CSS fallback; AnimatedTitle uses framer-motion). */
+@keyframes title-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.55em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes title-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-title-in {
+  animation: title-rise 0.55s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.animate-subtitle-in {
+  animation: title-fade 0.5s cubic-bezier(0.23, 1, 0.32, 1) 0.12s both;
+}
+#root {
+  overflow: hidden;
+}
+/* ---------------------------------------------------------------
+   Dark theme: a single surface layer that remaps the neutral scale
+   used across the product, so every screen themes consistently.
+   --------------------------------------------------------------- */
+.dark body {
+  background-color: #0b1220;
+  color: #e2e8f0;
+}
+.dark .bg-white {
+  background-color: #111a2b;
+}
+.dark .bg-slate-50 {
+  background-color: #0b1220;
+}
+.dark .bg-slate-100 {
+  background-color: #17223a;
+}
+.dark .bg-slate-200 {
+  background-color: #1f2b45;
+}
+.dark .hover\:bg-slate-50:hover {
+  background-color: #17223a;
+}
+.dark .hover\:bg-slate-100:hover {
+  background-color: #1c2740;
+}
+.dark .hover\:bg-slate-200\/70:hover {
+  background-color: #1c2740;
+}
+.dark .border-slate-100 {
+  border-color: #1b2740;
+}
+.dark .border-slate-200 {
+  border-color: #223049;
+}
+.dark .border-slate-300 {
+  border-color: #2b3a56;
+}
+.dark .hover\:border-slate-300:hover,
+.dark .hover\:border-slate-400:hover {
+  border-color: #3a4c6d;
+}
+.dark .text-slate-900 {
+  color: #e9eef7;
+}
+.dark .text-slate-800 {
+  color: #dbe3ef;
+}
+.dark .text-slate-700 {
+  color: #c5d0e0;
+}
+.dark .text-slate-600 {
+  color: #a8b6cb;
+}
+.dark .text-slate-500 {
+  color: #93a2ba;
+}
+.dark .text-slate-400 {
+  color: #7d8da6;
+}
+/* Dark mode: the brand scale plays two roles, so it is split.
+   `bg-brand-*` is a FILL — the primary button is `bg-brand-700 text-white`
+   (85 pairings across the app), so those steps stay solid and dark and white
+   keeps >=4.5:1 on them. `text-brand-*` is an INK read off a dark panel, so
+   those steps must lighten. One custom property cannot be both, which is why
+   the earlier single set of `--brand-*` values could not serve them: it made
+   500-700 semi-transparent, which measured 2.13-4.54:1 as text (every scheme
+   below AA at step 500) while also washing the button fill out. Fills live in
+   `--brand-*`, inks in `--brand-ink-*`, and the `.dark .text-brand-*` rules
+   further down are what read the ink ramp. Values are generated, not eyeballed:
+   each ink clears 4.5:1 on all three dark surfaces (#0b1220/#111a2b/#17223a)
+   and each fill clears 4.5:1 against white. */
+
+.dark {
+  --brand-50: rgba(71, 85, 105, 0.12);
+  --brand-100: rgba(71, 85, 105, 0.2);
+  --brand-200: rgba(71, 85, 105, 0.3);
+  --brand-300: rgba(71, 85, 105, 0.4);
+  --brand-400: rgba(71, 85, 105, 0.5);
+  --brand-500: #6b778a;
+  --brand-600: #64748b;
+  --brand-700: #475569;
+  --brand-800: #334155;
+  --brand-900: #1e293b;
+  --brand-ink-500: #7c8a9d;
+  --brand-ink-600: #8794a6;
+  --brand-ink-700: #939eae;
+  --brand-ink-800: #9ea8b7;
+  --brand-ink-900: #a9b2bf;
+  --brand-text-100: #f1f5f9;
+  --brand-text-200: #e2e8f0;
+  --brand-text-300: #cbd5e1;
+}
+
+.dark.color-scheme-green {
+  --brand-50: rgba(23, 162, 148, 0.12);
+  --brand-100: rgba(23, 162, 148, 0.2);
+  --brand-200: rgba(23, 162, 148, 0.3);
+  --brand-300: rgba(23, 162, 148, 0.4);
+  --brand-400: rgba(23, 162, 148, 0.5);
+  --brand-500: #29837b;
+  --brand-600: #14847c;
+  --brand-700: #0d8379;
+  --brand-800: #0f6d67;
+  --brand-900: #115a56;
+  --brand-ink-500: #17a294;
+  --brand-ink-600: #28a99c;
+  --brand-ink-700: #39b0a4;
+  --brand-ink-800: #4ab6ab;
+  --brand-ink-900: #5bbdb3;
+  --brand-text-100: #d6f5ee;
+  --brand-text-200: #a9e9dd;
+  --brand-text-300: #6fd6c6;
+}
+
+.dark.color-scheme-blue {
+  --brand-50: rgba(59, 130, 246, 0.12);
+  --brand-100: rgba(59, 130, 246, 0.2);
+  --brand-200: rgba(59, 130, 246, 0.3);
+  --brand-300: rgba(59, 130, 246, 0.4);
+  --brand-400: rgba(59, 130, 246, 0.5);
+  --brand-500: #4677b6;
+  --brand-600: #3573da;
+  --brand-700: #2563eb;
+  --brand-800: #1d4ed8;
+  --brand-900: #1e40af;
+  --brand-ink-500: #4286f6;
+  --brand-ink-600: #5090f7;
+  --brand-ink-700: #5e99f8;
+  --brand-ink-800: #6da2f8;
+  --brand-ink-900: #7babf9;
+  --brand-text-100: #dbeafe;
+  --brand-text-200: #bfdbfe;
+  --brand-text-300: #93c5fd;
+}
+
+.dark.color-scheme-yellow {
+  --brand-50: rgba(245, 158, 11, 0.12);
+  --brand-100: rgba(245, 158, 11, 0.2);
+  --brand-200: rgba(245, 158, 11, 0.3);
+  --brand-300: rgba(245, 158, 11, 0.4);
+  --brand-400: rgba(245, 158, 11, 0.5);
+  --brand-500: #8f7122;
+  --brand-600: #9e6a13;
+  --brand-700: #b0630b;
+  --brand-800: #b45309;
+  --brand-900: #92400e;
+  --brand-ink-500: #f59e0b;
+  --brand-ink-600: #f6a51d;
+  --brand-ink-700: #f7ac2f;
+  --brand-ink-800: #f7b341;
+  --brand-ink-900: #f8ba52;
+  --brand-text-100: #fef3c7;
+  --brand-text-200: #fde68a;
+  --brand-text-300: #fcd34d;
+}
+
+.dark.color-scheme-purple {
+  --brand-50: rgba(168, 85, 247, 0.12);
+  --brand-100: rgba(168, 85, 247, 0.2);
+  --brand-200: rgba(168, 85, 247, 0.3);
+  --brand-300: rgba(168, 85, 247, 0.4);
+  --brand-400: rgba(168, 85, 247, 0.5);
+  --brand-500: #8c63bc;
+  --brand-600: #9a4fe4;
+  --brand-700: #9333ea;
+  --brand-800: #7e22ce;
+  --brand-900: #6b21a8;
+  --brand-ink-500: #b064f8;
+  --brand-ink-600: #b670f8;
+  --brand-ink-700: #bc7cf9;
+  --brand-ink-800: #c389f9;
+  --brand-ink-900: #c995fa;
+  --brand-text-100: #f3e8ff;
+  --brand-text-200: #e9d5ff;
+  --brand-text-300: #d8b4fe;
+}
+
+.dark.color-scheme-orange {
+  --brand-50: rgba(249, 115, 22, 0.12);
+  --brand-100: rgba(249, 115, 22, 0.2);
+  --brand-200: rgba(249, 115, 22, 0.3);
+  --brand-300: rgba(249, 115, 22, 0.4);
+  --brand-400: rgba(249, 115, 22, 0.5);
+  --brand-500: #a96632;
+  --brand-600: #bb5a19;
+  --brand-700: #cb4e0f;
+  --brand-800: #c2410c;
+  --brand-900: #9a3412;
+  --brand-ink-500: #f97316;
+  --brand-ink-600: #f97d27;
+  --brand-ink-700: #fa8738;
+  --brand-ink-800: #fa9249;
+  --brand-ink-900: #fb9c5a;
+  --brand-text-100: #ffedd5;
+  --brand-text-200: #fed7aa;
+  --brand-text-300: #fdba74;
+}
+
+.dark.color-scheme-red {
+  --brand-50: rgba(239, 68, 68, 0.12);
+  --brand-100: rgba(239, 68, 68, 0.2);
+  --brand-200: rgba(239, 68, 68, 0.3);
+  --brand-300: rgba(239, 68, 68, 0.4);
+  --brand-400: rgba(239, 68, 68, 0.5);
+  --brand-500: #ba585c;
+  --brand-600: #d63f40;
+  --brand-700: #dc2626;
+  --brand-800: #b91c1c;
+  --brand-900: #991b1b;
+  --brand-ink-500: #f05151;
+  --brand-ink-600: #f15f5f;
+  --brand-ink-700: #f36c6c;
+  --brand-ink-800: #f47a7a;
+  --brand-ink-900: #f58888;
+  --brand-text-100: #fee2e2;
+  --brand-text-200: #fecaca;
+  --brand-text-300: #fca5a5;
+}
+
+.dark.color-scheme-pink {
+  --brand-50: rgba(236, 72, 153, 0.12);
+  --brand-100: rgba(236, 72, 153, 0.2);
+  --brand-200: rgba(236, 72, 153, 0.3);
+  --brand-300: rgba(236, 72, 153, 0.4);
+  --brand-400: rgba(236, 72, 153, 0.5);
+  --brand-500: #b3578c;
+  --brand-600: #ca4087;
+  --brand-700: #db2777;
+  --brand-800: #be185d;
+  --brand-900: #9d174d;
+  --brand-ink-500: #ec4999;
+  --brand-ink-600: #ed56a1;
+  --brand-ink-700: #ef63a8;
+  --brand-ink-800: #f071b0;
+  --brand-ink-900: #f27eb7;
+  --brand-text-100: #fce7f3;
+  --brand-text-200: #fbcfe8;
+  --brand-text-300: #f9a8d4;
+}
+
+.dark.color-scheme-ocean {
+  --brand-50: rgba(229, 247, 249, 0.12);
+  --brand-100: rgba(201, 241, 248, 0.2);
+  --brand-200: rgba(161, 230, 241, 0.3);
+  --brand-300: rgba(104, 209, 224, 0.42);
+  --brand-400: rgba(40, 170, 186, 0.55);
+  --brand-500: #007d8b;
+  --brand-600: #006a76;
+  --brand-700: #00545e;
+  --brand-800: #004047;
+  --brand-900: #002d33;
+  --brand-ink-500: #0098a8;
+  --brand-ink-600: #2197a6;
+  --brand-ink-700: #3895a2;
+  --brand-ink-800: #4a949f;
+  --brand-ink-900: #58929b;
+  --brand-text-100: #c9f1f8;
+  --brand-text-200: #a1e6f1;
+  --brand-text-300: #68d1e0;
+}
+
+/* Tinted surfaces. The variables already carry these, but the explicit rules
+   give the remap layer the higher specificity it needs to beat the plain
+   `.bg-brand-50` utility, and they are what darkTheme.test.ts scans for. */
+.dark .bg-brand-50 {
+  background-color: var(--brand-50);
+}
+.dark .bg-brand-100 {
+  background-color: var(--brand-100);
+}
+.dark .bg-brand-200 {
+  background-color: var(--brand-200);
+}
+.dark .bg-brand-300 {
+  background-color: var(--brand-300);
+}
+.dark .hover\:bg-brand-50:hover {
+  background-color: var(--brand-100);
+}
+.dark .hover\:bg-brand-100:hover {
+  background-color: var(--brand-200);
+}
+.dark .hover\:bg-brand-200:hover {
+  background-color: var(--brand-300);
+}
+.dark .hover\:bg-brand-300:hover {
+  background-color: var(--brand-400);
+}
+
+/* Brand inks. Light mode darkens on hover; dark mode has to lighten instead,
+   so each hover steps one rung further up the ramp. */
+.dark .text-brand-500 {
+  color: var(--brand-ink-500);
+}
+.dark .text-brand-600 {
+  color: var(--brand-ink-600);
+}
+.dark .text-brand-700 {
+  color: var(--brand-ink-700);
+}
+.dark .text-brand-800 {
+  color: var(--brand-ink-800);
+}
+.dark .text-brand-900 {
+  color: var(--brand-ink-900);
+}
+.dark .hover\:text-brand-500:hover {
+  color: var(--brand-ink-600);
+}
+.dark .hover\:text-brand-600:hover {
+  color: var(--brand-ink-700);
+}
+.dark .hover\:text-brand-700:hover {
+  color: var(--brand-ink-800);
+}
+.dark .hover\:text-brand-800:hover {
+  color: var(--brand-ink-900);
+}
+.dark .hover\:text-brand-900:hover {
+  color: var(--brand-ink-900);
+}
+
+/* Borders and dots need to read on a dark edge, so they take the ink ramp too. */
+.dark .border-brand-100 {
+  border-color: var(--brand-ink-500);
+}
+.dark .border-brand-200 {
+  border-color: var(--brand-ink-500);
+}
+.dark .border-brand-300 {
+  border-color: var(--brand-ink-600);
+}
+.dark .border-brand-400 {
+  border-color: var(--brand-ink-600);
+}
+.dark .border-brand-500 {
+  border-color: var(--brand-ink-700);
+}
+.dark .border-brand-600 {
+  border-color: var(--brand-ink-700);
+}
+
+/* Custom color scheme will be handled dynamically via JavaScript */
+.color-scheme-custom {
+  /* Colors will be set dynamically via CSS variables */
+}
+/* Semantic accents. The neutral and brand scales above are remapped for dark
+   mode; the accent families were not, so a "needs history" badge stayed a
+   near-white chip on a dark panel and the red/amber inks sat near 3:1 against
+   the dark surface (#dc2626 on #111a2b is 3.6:1, #047857 is 3.1:1 — both below
+   AA's 4.5:1 for small text). Tints become translucent, and the inks lighten to
+   the shade that reads on them. Solid fills used with white text (brand-600/700,
+   red-600, emerald-500/600) are deliberately left alone. */
+.dark .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.12);
+}
+.dark .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.2);
+}
+.dark .text-amber-500,
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 {
+  color: #fcd34d;
+}
+.dark .text-amber-900 {
+  color: #fde68a;
+}
+.dark .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+.dark .bg-red-100 {
+  background-color: rgba(239, 68, 68, 0.2);
+}
+.dark .text-red-500,
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800 {
+  color: #fca5a5;
+}
+.dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+.dark .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.2);
+}
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900 {
+  color: #6ee7b7;
+}
+.dark .bg-sky-50 {
+  background-color: rgba(14, 165, 233, 0.12);
+}
+.dark .bg-sky-100 {
+  background-color: rgba(14, 165, 233, 0.2);
+}
+.dark .text-rose-600,
+.dark .text-rose-700,
+.dark .text-rose-800 {
+  color: #fda4af;
+}
+.dark .text-sky-500,
+.dark .text-sky-600,
+.dark .text-sky-700,
+.dark .text-sky-800 {
+  color: #7dd3fc;
+}
+/* Hover counterparts, so a hover does not flash a light chip onto a dark page. */
+.dark .hover\:bg-brand-50:hover {
+  background-color: rgba(71, 85, 105, 0.12);
+}
+.dark .hover\:bg-brand-100:hover {
+  background-color: rgba(71, 85, 105, 0.2);
+}
+.dark .hover\:border-brand-300:hover,
+.dark .hover\:border-brand-400:hover {
+  border-color: rgba(71, 85, 105, 0.45);
+}
+.dark .hover\:text-brand-600:hover,
+.dark .hover\:text-brand-700:hover,
+.dark .hover\:text-brand-800:hover {
+  color: #94a3b8;
+}
+.dark .hover\:bg-red-50:hover {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+.dark .hover\:border-red-300:hover {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.dark .hover\:text-red-600:hover,
+.dark .hover\:text-red-700:hover {
+  color: #fca5a5;
+}
+.dark .hover\:text-rose-600:hover {
+  color: #fda4af;
+}
+.dark .hover\:bg-rose-50:hover {
+  background-color: rgba(244, 63, 94, 0.14);
+}
+.dark .hover\:text-emerald-600:hover {
+  color: #6ee7b7;
+}
+.dark .hover\:bg-emerald-100:hover {
+  background-color: rgba(16, 185, 129, 0.2);
+}
+
+/* Accent borders. Only the neutral and brand steps carried a dark value above,
+   so a `border-rose-300` or `border-amber-200` edge stayed pale and glaring
+   against the dark surface. Each takes its family tint at the alpha a hairline
+   needs to stay visible without becoming the brightest thing on the card. */
+.dark .border-amber-200,
+.dark .border-amber-300 {
+  border-color: rgba(245, 158, 11, 0.4);
+}
+.dark .border-red-200,
+.dark .border-red-300 {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.dark .border-rose-300 {
+  border-color: rgba(244, 63, 94, 0.4);
+}
+.dark .border-emerald-200,
+.dark .border-emerald-300 {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+.dark .border-sky-200,
+.dark .border-sky-300 {
+  border-color: rgba(14, 165, 233, 0.4);
+}
+
+/* Interaction variants. The layer handled `hover:` and nothing else, so every
+   `disabled:` and `focus-visible:` control kept its light-mode paint: a
+   `disabled:bg-slate-300` button under `text-white` rendered a #cbd5e1 slab at
+   1.48:1 on the dark page, and `hover:text-slate-700` turned a link almost
+   black the moment it was hovered. Disabled surfaces take the muted dark fill,
+   disabled inks a dim step, and hovered neutral inks lighten exactly as their
+   un-prefixed counterparts do. */
+.dark .disabled\:bg-slate-300:disabled,
+.dark .disabled\:bg-slate-200:disabled,
+.dark .disabled\:bg-slate-100:disabled,
+.dark .disabled\:bg-slate-50:disabled {
+  background-color: #1f2b45;
+}
+.dark .disabled\:border-slate-200:disabled {
+  border-color: #223049;
+}
+.dark .disabled\:text-slate-500:disabled,
+.dark .disabled\:text-slate-400:disabled {
+  color: #7d8da6;
+}
+.dark .disabled\:bg-brand-500:disabled {
+  background-color: var(--brand-500);
+}
+.dark .disabled\:text-brand-500:disabled {
+  color: var(--brand-ink-500);
+}
+.dark .disabled\:text-brand-600:disabled {
+  color: var(--brand-ink-600);
+}
+.dark .group:hover .group-hover\:text-brand-600 {
+  color: var(--brand-ink-600);
+}
+.dark .focus-visible\:bg-slate-50:focus-visible {
+  background-color: #17223a;
+}
+.dark .focus-visible\:bg-red-50:focus-visible {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+.dark .hover\:bg-slate-200:hover {
+  background-color: #1f2b45;
+}
+.dark .hover\:text-slate-900:hover {
+  color: #e9eef7;
+}
+.dark .hover\:text-slate-800:hover {
+  color: #dbe3ef;
+}
+.dark .hover\:text-slate-700:hover {
+  color: #c5d0e0;
+}
+.dark .hover\:text-slate-600:hover {
+  color: #a8b6cb;
+}
+
+/* Opacity-modified tints. `bg-brand-50/60` is a *different class name* from
+   `bg-brand-50`, so none of the rules above match it and the light wash was
+   painted straight onto the dark page. On the forecast explainer that put
+   `text-slate-900` (#e9eef7 once themed) on a 60%-white panel — 1.1:1, i.e.
+   invisible. Each variant takes its family's dark value, so a `/NN` tint reads
+   as the same surface as the un-suffixed class it modifies. */
+.dark .bg-brand-50\/60,
+.dark .bg-brand-50\/50,
+.dark .bg-brand-50\/40 {
+  background-color: var(--brand-50);
+}
+.dark .hover\:bg-brand-50\/50:hover,
+.dark .hover\:bg-brand-50\/40:hover {
+  background-color: var(--brand-100);
+}
+/* Amber has no CSS variable to point at, so this repeats the value from
+   `.dark .bg-amber-50` above rather than inventing a second one. */
+.dark .bg-amber-50\/60 {
+  background-color: rgba(245, 158, 11, 0.12);
+}
+.dark .bg-slate-50\/70,
+.dark .bg-slate-50\/60,
+.dark .bg-slate-50\/50 {
+  background-color: #0b1220;
+}
+.dark .hover\:bg-slate-50\/60:hover {
+  background-color: #17223a;
+}
+.dark .hover\:bg-slate-200\/70:hover {
+  background-color: #1f2b45;
+}
+.dark .bg-red-50\/40 {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+.dark .border-slate-200\/90,
+.dark .border-slate-200\/80,
+.dark .border-slate-200\/60 {
+  border-color: #223049;
+}
+.dark .border-brand-300\/60 {
+  border-color: rgba(71, 85, 105, 0.45);
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f1828;
+  color: #e9eef7;
+}
+/* Recharts paints the grid line, the axis ticks and the tooltip with inline
+   SVG attributes / inline styles rather than classes, so none of the overrides
+   above reach them. The grid rule was already here; the axis ink (#64748b on
+   #111a2b is 3.7:1) and the tooltip were not, and the tooltip defaults to
+   recharts' white background — inherited light text made it unreadable.
+   `!important` is required only where recharts sets an inline `style`. */
+.dark .recharts-cartesian-grid line {
+  stroke: #223049;
+}
+.dark .recharts-cartesian-axis-tick text {
+  fill: #93a2ba;
+}
+.dark .recharts-label {
+  fill: #93a2ba !important;
+}
+.dark .recharts-default-tooltip {
+  background-color: #111a2b !important;
+  border-color: #223049 !important;
+}
+.dark .recharts-tooltip-label {
+  color: #93a2ba !important;
+}
+.dark .recharts-tooltip-item,
+.dark .recharts-tooltip-item * {
+  color: #e9eef7 !important;
+}
+
+/* -----------------------------------------------------------------
+   Autofill — Chrome's persistent grey/yellow background on saved
+   credentials. Without this the Email/Password fields stay grey after
+   autofill (see screenshot demo@demandiq.app) and never return to
+   white, even after editing. Applied to every input/select/textarea
+   so the fix is site-wide, not per-component.
+----------------------------------------------------------------- */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px white inset !important;
+  -webkit-text-fill-color: #0f172a !important;
+  caret-color: #0f172a !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #0f1828 inset !important;
+  -webkit-text-fill-color: #e9eef7 !important;
+  caret-color: #e9eef7 !important;
+}
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px white inset !important;
+  -webkit-text-fill-color: #0f172a !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+.dark select:-webkit-autofill,
+.dark textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #0f1828 inset !important;
+  -webkit-text-fill-color: #e9eef7 !important;
+}
+
+/* ---------------------------------------------------------------
+   Mobile foundations.
+   --------------------------------------------------------------- */
+
+/*
+ * The app shell is a full-height flex column with its own scroll region.
+ * `100vh` on a phone measures the viewport *including* the browser chrome, so
+ * the bottom nav sits behind the address bar when it is showing. `100dvh`
+ * tracks the real visible area. Declared in one place with `vh` first so
+ * browsers without `dvh` still get a usable height.
+ */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/*
+ * Bottom-fixed navigation and sheets must clear the iOS home indicator.
+ * Without this the last row of the nav is unreachable under the swipe bar.
+ */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-bottom-offset {
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * A phone has no visible scrollbar, so a horizontally scrollable table looks
+ * like a cropped table. These soft edge fades signal that there is more to the
+ * side, and are re-coloured for the dark theme.
+ */
+.scroll-fade-x {
+  background:
+    linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)) left center / 24px 100% no-repeat,
+    linear-gradient(to left, #fff 30%, rgba(255, 255, 255, 0)) right center / 24px 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.14), rgba(15, 23, 42, 0)) left center / 10px 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.14), rgba(15, 23, 42, 0)) right center / 10px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+.dark .scroll-fade-x {
+  background:
+    linear-gradient(to right, #111a2b 30%, rgba(17, 26, 43, 0)) left center / 24px 100% no-repeat,
+    linear-gradient(to left, #111a2b 30%, rgba(17, 26, 43, 0)) right center / 24px 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0)) left center / 10px 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0)) right center / 10px 100% no-repeat;
+}
+
+/* Momentum scrolling inside a scroll container, matching native app feel. */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: contain;
+}
+
+/*
+ * Grows a small control's touch target to 44px without changing its visual
+ * size or moving anything: the extra area is a transparent pseudo-element,
+ * which still counts as part of the button. Used for text links and icon-only
+ * buttons, where padding the real box would change the layout.
+ */
+@media (max-width: 767px) {
+  .tap-expand {
+    position: relative;
+  }
+  .tap-expand::after {
+    content: '';
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+}
+
+/*
+ * Column priority for the tablet band.
+ *
+ * Between 768px and 1023px a table has to fit its wrapper without a horizontal
+ * scrollbar, but hiding a column outright below `md` would also drop it from
+ * the phone card, where the stacked layout has room for every field. So the
+ * class only bites inside the tablet band: cards keep the column, desktop
+ * keeps the column, and only the squeezed middle drops it.
+ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .hide-tablet {
+    display: none;
+  }
+}
+
+/*
+ * ResponsiveTable's card mode (see components/ui/Table.tsx).
+ *
+ * A data table is unreadable on a 320px screen: you get the first two columns
+ * and have to drag sideways to see the rest. Below `md` each row becomes its
+ * own card, with the column labels moved in front of the values via
+ * `data-label`. The markup is unchanged, so there is one control per row and
+ * nothing is duplicated in the DOM.
+ */
+@media (max-width: 767px) {
+  .responsive-cards {
+    display: block;
+    min-width: 0 !important;
+    border-collapse: separate;
+  }
+  .responsive-cards thead {
+    display: none;
+  }
+  .responsive-cards tbody {
+    display: block;
+  }
+  .responsive-cards tr {
+    display: block;
+    margin-bottom: 0.625rem;
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background-color: #fff;
+  }
+  .responsive-cards tr:last-child {
+    margin-bottom: 0;
+  }
+  /* `tbody th` is the row-header cell (the primary column); it takes the same
+     card layout as a `td`, then the `[data-primary]` rule below turns it into
+     the card's heading. */
+  .responsive-cards td,
+  .responsive-cards tbody th {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.15rem 0 !important;
+    border: 0;
+    text-align: right;
+  }
+  .responsive-cards td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    /* slate-500, not slate-400: the lighter grey fails WCAG AA on white. */
+    color: #64748b;
+  }
+  /* A cell with no label (icon-only, or the primary heading) shows no label. */
+  .responsive-cards td[data-label='']::before,
+  .responsive-cards td:not([data-label])::before {
+    display: none;
+  }
+  /* The primary column becomes the card heading. */
+  .responsive-cards td[data-primary],
+  .responsive-cards tbody th[data-primary] {
+    display: block;
+    padding: 0 0 0.5rem !important;
+    text-align: left;
+  }
+  .responsive-cards td[data-primary]::before {
+    display: none;
+  }
+  /* Columns marked cardHidden are desktop-only. */
+  .responsive-cards td[data-card-hidden] {
+    display: none;
+  }
+  .dark .responsive-cards tr {
+    border-color: #223049;
+    background-color: #111a2b;
+  }
+  .dark .responsive-cards td::before {
+    color: #7d8da6;
+  }
+}
+
+/*
+ * Reduced motion. The framer-motion surfaces already branch on
+ * `useReducedMotion`, but the CSS animations the rest of the app relies on
+ * (`animate-spin` on spinners, `animate-pulse` on skeletons and the live dot,
+ * `fadeIn` on modals) did not. This neutralises them all in one place rather
+ * than teaching every caller about the preference. The loaders stay legible:
+ * the skeleton keeps its shape and its `role="status"` name, and the spinner
+ * renders as a static ring.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* -----------------------------------------------------------------
+   Marketing-surface texture (DESIGN.md § Surfaces).
+   A flat vector page reads as sterile; a fixed, pointer-events-none
+   grain layer breaks the flatness without touching legibility. It is
+   declared once and reused, not per section. Opacity stays low enough
+   that it never competes with text contrast.
+----------------------------------------------------------------- */
+.grain-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.04;
+}
+.dark .grain-overlay {
+  opacity: 0.06;
+}
+
+/* A soft wash behind a heading block. Cheaper and calmer than a full image. */
+.wash-brand {
+  background:
+    radial-gradient(120% 120% at 12% 0%, rgba(13, 148, 136, 0.10), transparent 58%),
+    radial-gradient(90% 90% at 100% 10%, rgba(15, 23, 42, 0.05), transparent 55%);
+}
+.dark .wash-brand {
+  background:
+    radial-gradient(120% 120% at 12% 0%, rgba(23, 162, 148, 0.16), transparent 58%),
+    radial-gradient(90% 90% at 100% 10%, rgba(255, 255, 255, 0.04), transparent 55%);
+}
+
+/* Cap long-form measure at ~65ch (DESIGN.md § Typography). */
+.measure {
+  max-width: 65ch;
+}
+
+/*
+ * A heading block that must not orphan its last word. Tailwind ships
+ * `text-balance` / `text-pretty`; this keeps a single named utility for
+ * the marketing surfaces so the intent is greppable.
+ */
+.title-balance {
+  text-wrap: balance;
+}
+.body-pretty {
+  text-wrap: pretty;
+}

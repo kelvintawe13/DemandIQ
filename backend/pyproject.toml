@@ -1,0 +1,155 @@
+[project]
+name = "demandiq-backend"
+version = "1.0.0"
+description = "DemandIQ FastAPI backend — ingestion & normalisation -> NormalizedDemandData -> forecasting (point + adaptive conformal 90%), policy simulation (SR/PS/UD), SHAP explainability, PostgreSQL+Redis — Recruit (Kaggle academic) / URBAN-WASTE (CC BY 4.0) boundary"
+authors = [{name = "Kelvin Tawe", email = "kelvin.tawe@alustudent.com"}]
+maintainers = [{name = "African Leadership University, BSc Software Engineering (2026)"}]
+keywords = ["demand-forecasting", "food-waste", "fastapi", "conformal-prediction", "shap"]
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",
+    "psycopg2-binary>=2.9.0",
+    "redis>=5.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.6",
+    "httpx>=0.25.0",
+    "pyotp>=2.9.0",
+    "email-validator>=2.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.6.0",
+]
+# Real model serving (MODEL_BUNDLE_PATH): LightGBM inference + interval state.
+model = [
+    "lightgbm>=4.0.0",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "joblib>=1.3.0",
+]
+# Local OCR for handwritten-log ingestion (OCR_SERVICE_URL is the alternative).
+ocr = [
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/kelvintawe12/DemandIQ"
+Documentation = "https://github.com/kelvintawe12/DemandIQ/blob/main/backend/ARCHITECTURE.md"
+"API Contract" = "https://github.com/kelvintawe12/DemandIQ/blob/main/backend/API_ENDPOINTS.md"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "migrations*"]
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# ``integration`` marks tests that need a real, migrated Postgres. They are
+# skipped unless DEMANDIQ_RUN_INTEGRATION is set (scripts/ingest_e2e.sh), so
+# ``make test-backend`` stays hermetic.
+markers = [
+    "integration: needs a migrated Postgres — run scripts/ingest_e2e.sh",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# The gate covers the whole backend tree (app/, tests/, scripts/, migrations/) —
+# not the frozen eight-file list it used to. Selection is ruff's classic error
+# set (pycodestyle E4/E7/E9 + pyflakes F), import sorting, the pyupgrade family
+# (UP: Optional[X] -> X | None, PEP 604 unions, datetime.UTC), bugbear's
+# function-call-in-default-argument, which is live for everything except the
+# FastAPI markers allowlisted below, flake8-datetimez (DTZ), so that a naive
+# local-time datetime cannot creep back in, and S110/S112 so that a swallowed
+# exception must at least reach the logger (neither pass nor continue).
+#
+# Deliberately NOT selected yet. These are real findings, not noise; each needs
+# a sweep of its own, and listing them here keeps the backlog visible instead of
+# burying it in `ignore`. Counts are whole-tree at the time of writing.
+#
+#   BLE001 blind-except                       80   measured, and not a defect
+#     list. Every site is one of: 14 that already log the exception, 40 that
+#     assign a documented fallback (`rows = []`, `calib = None`) so an optional
+#     read or a mocked session cannot break the request, and 26 that convert the
+#     failure into an HTTP error, a per-row error entry, or a rollback. The rule
+#     cannot tell any of those from a handler that hides a bug, so selecting it
+#     would cost ~80 `# noqa` comments and buy no new safety. The enforceable
+#     half of "never swallow" is S110/S112 above.
+#
+# flake8-bandit (S) is selected whole. It was deferred once as "not a defect
+# list", but measuring it changed that: five `assert` guards in app code were
+# stripped under `python -O` (one of them the last line of the feature-leakage
+# defence in app/services/feature_build.py), `urlopen` was called on a URL whose
+# scheme was not statically known, and SQL was built with an f-string. All are
+# now fixed rather than ignored, and the tree is clean with the per-file
+# exceptions below.
+select = ["E4", "E7", "E9", "F", "I", "UP", "B008", "DTZ", "S"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's parameter markers are *meant* to be called in argument defaults —
+# that is the framework's wiring idiom (`limit: int = Query(20, le=200)`), not
+# the shared-mutable-default hazard B008 exists to catch: each call returns a
+# fresh marker instance. Allowlisting exactly these names keeps B008 live for
+# everything else, so `def f(items=[], when=datetime.datetime.now())` still
+# fails the gate.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ORM models use string forward-references for cross-file relationships;
+# with `from __future__ import annotations` ruff's UP037 un-quoting breaks
+# them at class-definition time (F821), so these files opt out together.
+"app/models/*.py" = ["UP037", "F821"]
+
+# `assert` is the test idiom, and S105/S106/S107 match *names*: the fixtures
+# pass literals to parameters called `pwd`/`password`, which is the data under
+# test, not a shipped credential. App code is held to all four.
+"tests/**/*.py" = ["S101", "S105", "S106", "S107"]
+# An assert-driven E2E harness, the same role the suite plays. Its checks are
+# meant to abort on the first mismatch.
+"scripts/auth_e2e.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+strict = true
+# The app passes `strict` except for two categories that are tracked openly
+# rather than hidden behind a fake check:
+#   unused-ignore  ~153 stale `# type: ignore` comments left by refactors
+#   type-arg        ~41 missing type parameters for generic types
+# `make lint-backend` therefore gates on the real command below. Enabling these
+# two is a follow-up sweep; until then a genuine type error still fails the gate.
+disable_error_code = ["unused-ignore", "type-arg"]

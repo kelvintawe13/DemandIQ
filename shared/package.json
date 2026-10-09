@@ -1,0 +1,19 @@
+{
+  "name": "@demandiq/shared",
+  "version": "1.0.0",
+  "description": "Shared types and utilities for DemandIQ — canonical NormalizedDemandData schema (location_id, date, demand_qty), Forecast/interval/policy types (SR/PS/UD), Dataset provenance (Recruit Kaggle / URBAN-WASTE CC BY 4.0)",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "Kelvin Tawe (African Leadership University, 2026)",
+  "license": "PROPRIETARY",
+  "keywords": ["demand-forecasting", "shared-types", "schema"],
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

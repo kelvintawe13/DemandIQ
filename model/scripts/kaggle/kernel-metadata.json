@@ -1,0 +1,13 @@
+{
+  "id": "kelvin567890kl/demandiq-train",
+  "title": "demandiq-train",
+  "code_file": "run_train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "dataset_sources": ["kelvin567890kl/recruit-restaurant-visitor-forecasting"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

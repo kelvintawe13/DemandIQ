@@ -1,0 +1,256 @@
+# DemandIQ — containerised stack.
+#
+#   docker compose up -d --build     postgres, redis, migrations, API, web
+#   open http://localhost:5173/app/  the product UI
+#   open http://localhost:5173/       the OpenAPI console (proxied to the API)
+#
+# What changed from the previous version, and why:
+#
+#   * No `migrate` service. The old file started uvicorn against a database that
+#     nothing had migrated, so a fresh clone came up with no tables and the first
+#     request 500'd. `scripts/dev.sh` papered over this by running `alembic
+#     upgrade head` on the HOST before starting anything — which does nothing for
+#     a purely containerised stack. Alembic is the single source of truth for the
+#     schema (see the note in database/README.md), so it now runs as a gate:
+#     the API waits for the migration job to exit 0.
+#   * No `version:` key. Obsolete in Compose v2; it emits a warning on every run.
+#   * No `container_name`. It made the names global, so two checkouts could not
+#     run side by side, and it blocked `docker compose up --scale backend=3`.
+#     Services are now reachable by DNS name inside the network, which is all
+#     anything actually needs.
+#   * Postgres and redis no longer publish host ports. Port 5432 is published on
+#     most developer machines already (including this one), so binding it was an
+#     immediate "port is already allocated" failure. Use
+#     `docker compose exec postgres psql -U demandiq -d demandiq` instead, or
+#     uncomment the ports block below if you really want host access.
+#   * Secrets are no longer hardcoded, and backend/.env is optional rather than
+#     mandatory — the old `env_file: [./backend/.env]` made compose itself fail
+#     on a clone that had no .env yet.
+#   * Healthchecks on the API and web tiers, wired with
+#     `condition: service_healthy`, so startup order is actually enforced instead
+#     of being a sleep-and-hope.
+
+name: demandiq
+
+# ---------------------------------------------------------------------------
+# Shared fragments.
+#
+# The API, the migration job and the worker are three processes of the same
+# application, so they share one build and one image tag. `build` appears in the
+# anchor (rather than only on the api service) so that `docker compose up` on a
+# clean machine builds what the migration job needs — otherwise `migrate` would
+# reference an image that nothing had built yet.
+# ---------------------------------------------------------------------------
+x-api-build: &api-build
+  image: demandiq-backend:latest
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+    args:
+      # Real LightGBM inference needs the `model` extra; the bundle itself is
+      # mounted at /model by `*api-common` below and found by the loader's
+      # default candidates. Without the extra the image has no lightgbm/joblib,
+      # so the forecasting service falls back to stub forecasts — a legitimate
+      # way to run the UI but not to serve real numbers. See DOCKER.md.
+      INSTALL_EXTRAS: ${BACKEND_EXTRAS:-}
+
+x-api-env: &api-env
+  DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-demandiq}:${POSTGRES_PASSWORD:-demandiq}@postgres:5432/${POSTGRES_DB:-demandiq}
+  REDIS_URL: redis://redis:6379/0
+  APP_ENV: ${APP_ENV:-production}
+  # Uvicorn is told about X-Forwarded-* explicitly below; this is the app-side
+  # half of the same decision. Left false because the API port IS published by
+  # default, and a client that can reach :8000 directly can otherwise forge its
+  # own scheme. Flip both together when you stop publishing 8000.
+  TRUSTED_PROXY_HEADERS: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # Same-origin in the default topology (nginx proxies /api to the API), so
+  # cross-origin is not needed for the web tier. The dev origins are here for
+  # `docker compose --profile dev up`, where vite serves the app on its own
+  # origin and calls the API cross-origin.
+  CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]}'
+  JOBS_ENABLED: ${JOBS_ENABLED:-false}
+
+x-api-common: &api-common
+  <<: *api-build
+  # Optional on purpose: the old required form made `docker compose` abort on a
+  # fresh clone. `required:` needs Compose >= 2.24; that is the floor for this
+  # file.
+  #
+  # Keys in `environment` below take precedence over this file, so keep it to the
+  # container-specific ones only — JWT_SECRET and the OAuth/Turnstile secrets must
+  # stay under the deployer's control and are read from here.
+  env_file:
+    - path: ./backend/.env
+      required: false
+  environment: *api-env
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    # The repo's exported serving bundle is mounted read-only at /model, which
+    # is exactly the path `app/services/forecasting/bundle.py` probes. Without
+    # this mount the container has no copy of `model/` at all, so the API would
+    # silently serve stub rolling-mean forecasts even when BACKEND_EXTRAS=model
+    # was set. The image still needs that extra (lightgbm/joblib) for real
+    # inference; see DOCKER.md.
+    - ./model:/model:ro
+
+services:
+  # -------------------------------------------------------------------------
+  # Data stores
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-demandiq}
+      POSTGRES_USER: ${POSTGRES_USER:-demandiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demandiq}
+    # Default /dev/shm is 64MB, which makes parallel queries and index builds
+    # fail under load with "could not resize shared memory segment". Unrelated to
+    # password hashing: postgres 15 already defaults to scram-sha-256, so there
+    # is nothing to set there.
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-demandiq} -d ${POSTGRES_DB:-demandiq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432"   # uncomment only if nothing else holds 5432 on the host
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Snapshotting is on by default in the alpine image; these settings bound how
+    # much disk a burst of forecast writes can cost and keep the log readable.
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    # ports:
+    #   - "6379:6379"
+
+  # -------------------------------------------------------------------------
+  # Schema gate. Runs `alembic upgrade head` to completion, then exits; the API
+  # will not start until it exits 0. `restart: "no"` is required — a restart
+  # policy here would re-run migrations on every daemon restart.
+  # -------------------------------------------------------------------------
+  migrate:
+    <<: *api-common
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------------
+  # API
+  # -------------------------------------------------------------------------
+  backend:
+    <<: *api-common
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      # Published for the API console, /docs and the dev vite server. Close this
+      # in a real deployment and the only path in becomes the web tier — see the
+      # TRUSTED_PROXY_HEADERS note above.
+      - "${API_PORT:-8000}:8000"
+    # Long enough for in-flight inference and simulation requests to finish;
+    # uvicorn drains on SIGTERM, compose just has to wait for it.
+    stop_grace_period: 30s
+
+  # -------------------------------------------------------------------------
+  # Background jobs. Opt-in: `docker compose --profile worker up -d`.
+  #
+  # JOBS_ENABLED defaults to false, so the API does not also run the scheduler
+  # in-process. Turn exactly one of the two on — running both means every
+  # scheduled job fires twice.
+  # -------------------------------------------------------------------------
+  worker:
+    <<: *api-common
+    command: ["python", "-m", "app.jobs.worker"]
+    profiles: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # -------------------------------------------------------------------------
+  # Web tier: nginx serving the built SPA and reverse-proxying the API, so the
+  # browser only ever talks to one origin and there is no CORS preflight.
+  # -------------------------------------------------------------------------
+  frontend:
+    image: demandiq-frontend:latest
+    build:
+      # Repository root, not frontend/: there is no frontend/package-lock.json
+      # because dependencies are an npm workspace hoisted to the root lockfile.
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Empty means "same origin", which is what the proxy below provides.
+        VITE_API_URL: ${VITE_API_URL:-}
+        # Public identifiers — compiled into the bundle, safe to pass in, and
+        # matching the private halves in backend/.env.
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-5173}:8080"
+    # nginx drains on SIGQUIT (the base image's STOPSIGNAL); give it room.
+    stop_grace_period: 10s
+
+  # -------------------------------------------------------------------------
+  # Vite dev server in a container, for HMR against a containerised API.
+  # Opt-in: `docker compose --profile dev up -d` (then browse :5174).
+  #
+  # The default stack already publishes :5173 with the production bundle, so the
+  # two do not collide; this one is the hot-reload alternative, not a replacement.
+  # -------------------------------------------------------------------------
+  frontend-dev:
+    image: demandiq-frontend-dev:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    profiles: ["dev"]
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # Cross-origin by definition: the browser is on :5174 and the API on :8000.
+      # This origin is in the CORS_ORIGINS list above.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume so the host's node_modules (a different platform's
+      # binaries, and the root workspace install) never shadows the image's.
+      - /app/node_modules
+    ports:
+      - "${WEB_DEV_PORT:-5174}:5173"
+
+volumes:
+  postgres_data:
+  redis_data:

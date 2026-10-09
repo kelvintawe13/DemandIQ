@@ -1,0 +1,3409 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DemandIQ API — Gateway Console</title>
+<meta name="description" content="Explorer, live editor and health console for the DemandIQ forecasting API." />
+<style>
+/* ---------------------------------------------------------------------------
+   Tokens
+--------------------------------------------------------------------------- */
+:root {
+  --bg: #0a0f1a;
+  --bg-2: #0e1524;
+  --bg-3: #121b2d;
+  --panel: #101a2c;
+  --line: #1e2a42;
+  --line-soft: #172238;
+  --text: #e6edf7;
+  --text-2: #9fb0c9;
+  --text-3: #64758f;
+  --accent: #14b8a6;
+  --accent-2: #0d9488;
+  --accent-soft: rgba(20, 184, 166, 0.14);
+  --amber: #f59e0b;
+  --red: #f05252;
+  --blue: #3b82f6;
+  --violet: #a78bfa;
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+}
+html[data-theme="light"] {
+  --bg: #f4f6fb;
+  --bg-2: #ffffff;
+  --bg-3: #eef2f8;
+  --panel: #ffffff;
+  --line: #dde4ee;
+  --line-soft: #e8edf5;
+  --text: #0f172a;
+  --text-2: #4a5a72;
+  --text-3: #8494ab;
+  --accent-soft: rgba(13, 148, 136, 0.12);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------------------------------------------------------------------------
+   Top bar
+--------------------------------------------------------------------------- */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  height: 46px; flex: 0 0 46px;
+  padding: 0 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brand-mark {
+  width: 24px; height: 24px; border-radius: 7px; flex: none;
+  background: var(--accent); display: grid; place-items: center;
+}
+.brand-mark svg { width: 14px; height: 14px; }
+.brand-text { line-height: 1.1; }
+.brand-text b { font-size: 13px; letter-spacing: -0.01em; }
+.brand-text span { color: var(--accent); }
+.brand-sub { font-size: 8.5px; letter-spacing: 0.09em; color: var(--text-3); text-transform: uppercase; }
+.tag {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 2px 5px; border-radius: 4px; text-transform: uppercase;
+  background: var(--accent-soft); color: var(--accent);
+}
+.nav-tabs { display: flex; gap: 2px; }
+.nav-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.nav-tab:hover { background: var(--bg-3); color: var(--text); }
+.nav-tab[aria-selected="true"] { background: var(--accent); color: #04211d; }
+html[data-theme="light"] .nav-tab[aria-selected="true"] { color: #fff; }
+.spacer { flex: 1; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  border: 1px solid var(--line); color: var(--text-2);
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.dot.warn { background: var(--amber); }
+.dot.bad { background: var(--red); }
+.ghost-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 9px; border-radius: 7px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-2);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.ghost-btn:hover { background: var(--bg-3); color: var(--text); }
+.solid-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 7px;
+  font-size: 11.5px; font-weight: 700;
+  background: var(--accent); color: #04211d;
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1);
+}
+.solid-btn:hover { background: var(--accent-2); color: #fff; }
+
+/* ---------------------------------------------------------------------------
+   Shell
+--------------------------------------------------------------------------- */
+.shell { display: flex; min-height: 0; flex: 1; }
+
+.sidebar {
+  width: 268px; flex: none;
+  display: flex; flex-direction: column;
+  background: var(--bg-2);
+  border-right: 1px solid var(--line);
+  min-height: 0;
+}
+.sidebar.hidden { display: none; }
+.side-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px; border-bottom: 1px solid var(--line-soft);
+}
+.side-title {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3);
+  display: flex; align-items: center; gap: 6px;
+}
+.badge-out { font-size: 9px; font-weight: 700; letter-spacing: 0.07em; color: var(--red); }
+.badge-in { font-size: 9px; font-weight: 700; letter-spacing: 0.07em; color: var(--accent); }
+
+.side-block { padding: 11px 12px; border-bottom: 1px solid var(--line-soft); }
+.lbl {
+  display: block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-3); margin-bottom: 4px;
+}
+.field {
+  width: 100%; padding: 6px 8px;
+  background: var(--bg-3); border: 1px solid var(--line);
+  border-radius: 7px; font-size: 11.5px; color: var(--text);
+  transition: border-color 150ms cubic-bezier(.23,1,.32,1);
+}
+.field::placeholder { color: var(--text-3); }
+.field:focus { border-color: var(--accent); outline: none; }
+.row { display: flex; gap: 6px; }
+.row > * { min-width: 0; }
+.auth-note { font-size: 10.5px; color: var(--text-3); text-align: right; margin-top: 7px; }
+.mini-btn {
+  padding: 5px 9px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--line); color: var(--text-2);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.mini-btn:hover { background: var(--bg-3); color: var(--text); }
+.mini-btn.primary { background: var(--accent); color: #04211d; border-color: transparent; }
+.mini-btn.primary:hover { background: var(--accent-2); color: #fff; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  padding: 3px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+  border: 1px solid var(--line); color: var(--text-2);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.chip:hover { background: var(--bg-3); color: var(--text); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: #04211d; }
+
+.side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+.group { margin-bottom: 4px; }
+.group-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 8px; border-radius: 7px;
+  font-size: 11.5px; font-weight: 700; color: var(--text);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1);
+}
+.group-head:hover { background: var(--bg-3); }
+.group-count {
+  margin-left: auto; font-size: 10px; color: var(--text-3); font-weight: 600;
+}
+.caret { width: 9px; height: 9px; transition: transform 150ms cubic-bezier(.23,1,.32,1); }
+.group[data-open="false"] .caret { transform: rotate(-90deg); }
+.group[data-open="false"] .group-body { display: none; }
+.group-body { padding: 2px 0 4px; }
+
+.ep {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 5px 8px; border-radius: 7px; text-align: left;
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1);
+}
+.ep:hover { background: var(--bg-3); }
+.ep[aria-current="true"] { background: var(--accent-soft); }
+.ep-star { color: var(--text-3); font-size: 10px; flex: none; }
+.ep-star.on { color: var(--amber); }
+.method {
+  flex: none; width: 38px; text-align: center;
+  font: 700 8.5px/1.6 var(--mono); letter-spacing: 0.04em;
+  padding: 1px 0; border-radius: 4px;
+}
+.m-GET { background: rgba(20,184,166,.16); color: #2dd4bf; }
+.m-POST { background: rgba(59,130,246,.16); color: #60a5fa; }
+.m-PATCH { background: rgba(245,158,11,.16); color: #fbbf24; }
+.m-PUT { background: rgba(167,139,250,.16); color: #c4b5fd; }
+.m-DELETE { background: rgba(240,82,82,.16); color: #f87171; }
+.ep-path {
+  flex: 1; min-width: 0; font: 11px var(--mono);
+  color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ep[aria-current="true"] .ep-path { color: var(--text); }
+.ep-tag { font-size: 9.5px; color: var(--text-3); flex: none; }
+.ep-load {
+  flex: none; font-size: 9.5px; font-weight: 700; padding: 2px 7px;
+  border-radius: 5px; background: var(--bg-3); color: var(--text-2);
+}
+.ep:hover .ep-load { background: var(--accent); color: #04211d; }
+
+/* ---------------------------------------------------------------------------
+   Main
+--------------------------------------------------------------------------- */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main-tabs {
+  display: flex; align-items: center; gap: 4px;
+  padding: 7px 12px; border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.mtab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 7px; font-size: 11.5px; font-weight: 600;
+  color: var(--text-2);
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.mtab:hover { background: var(--bg-3); color: var(--text); }
+.mtab[aria-selected="true"] { background: var(--bg-3); color: var(--text); }
+.meta { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-3); }
+.meta b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.urlbar { display: flex; gap: 8px; padding: 10px 12px; }
+.method-select {
+  width: 104px; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg-3); border: 1px solid var(--line);
+  font: 700 12px var(--mono);
+}
+.url-input {
+  flex: 1; min-width: 0; padding: 8px 12px; border-radius: 8px;
+  background: var(--bg-3); border: 1px solid var(--line);
+  font: 12.5px var(--mono);
+}
+.url-input:focus { border-color: var(--accent); outline: none; }
+.send-btn {
+  padding: 8px 18px; border-radius: 8px; font-size: 12.5px; font-weight: 700;
+  background: var(--accent); color: #04211d; display: inline-flex; align-items: center; gap: 7px;
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1);
+}
+.send-btn:hover { background: var(--accent-2); color: #fff; }
+.send-btn[disabled] { opacity: .55; cursor: progress; }
+
+.subbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 0 12px 10px; font-size: 11px; color: var(--text-3);
+}
+.subbar .k { font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; font-size: 9.5px; }
+.subbar .v { color: var(--text-2); background: var(--bg-3); border-radius: 5px; padding: 2px 7px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); cursor: pointer; }
+.check input { accent-color: var(--accent); }
+
+.content { flex: 1; min-height: 0; overflow: hidden; padding: 0 12px 12px; }
+.split { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; height: 100%; }
+@media (max-width: 1100px) { .split { grid-template-columns: minmax(0,1fr); overflow-y: auto; } }
+
+.card {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden;
+}
+.card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 11px; border-bottom: 1px solid var(--line-soft);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3);
+}
+.card-head .tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.tool {
+  font-size: 10.5px; font-weight: 600; color: var(--text-3);
+  padding: 3px 7px; border-radius: 5px; letter-spacing: 0;
+  text-transform: none;
+  transition: background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1);
+}
+.tool:hover { background: var(--bg-3); color: var(--text); }
+.tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.card-body { flex: 1; min-height: 0; overflow: auto; padding: 11px; }
+
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 9px; }
+.status {
+  font: 700 11px var(--mono); padding: 3px 9px; border-radius: 6px;
+  background: rgba(20,184,166,.16); color: #2dd4bf;
+}
+.status.s4 { background: rgba(245,158,11,.16); color: #fbbf24; }
+.status.s5, .status.err { background: rgba(240,82,82,.16); color: #f87171; }
+.kv { font: 11px var(--mono); color: var(--text-3); }
+.hint {
+  font-size: 11.5px; color: var(--text-2); line-height: 1.6;
+  background: var(--bg-3); border-radius: 8px; padding: 9px 11px;
+}
+.hint code { font: 11px var(--mono); color: var(--accent); }
+
+table.hdrs { width: 100%; border-collapse: collapse; }
+table.hdrs th {
+  text-align: left; font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--text-3); padding: 0 8px 6px 0; font-weight: 700;
+}
+table.hdrs td {
+  padding: 5px 8px 5px 0; font: 11px var(--mono); color: var(--text-2);
+  border-top: 1px solid var(--line-soft); vertical-align: top; word-break: break-all;
+}
+table.hdrs td:first-child { color: var(--text-3); width: 38%; }
+
+pre.body-out {
+  margin: 0; font: 11.5px/1.65 var(--mono); color: var(--text);
+  white-space: pre; tab-size: 2;
+}
+.tok-key { color: #7dd3fc; }
+.tok-str { color: #86efac; }
+.tok-num { color: #fbbf24; }
+.tok-bool { color: var(--violet); }
+.tok-null { color: var(--text-3); }
+
+/* Live editor */
+.editor-wrap { display: grid; grid-template-columns: 44px minmax(0,1fr); height: 100%; min-height: 0; }
+.gutter {
+  font: 11.5px/1.65 var(--mono); color: var(--text-3); text-align: right;
+  padding: 11px 8px 11px 0; background: var(--bg-3); user-select: none; overflow: hidden;
+}
+.code-area {
+  width: 100%; height: 100%; resize: none; border: none; outline: none;
+  background: transparent; padding: 11px; color: var(--text);
+  font: 11.5px/1.65 var(--mono); white-space: pre; overflow: auto;
+}
+.editor-status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 11px; border-top: 1px solid var(--line-soft); font-size: 11px;
+}
+.ok-text { color: var(--accent); }
+.err-text { color: var(--red); }
+
+.snippet {
+  margin: 0 0 11px; padding: 10px 11px; border-radius: 8px;
+  background: var(--bg-3); border: 1px solid var(--line);
+  font: 11px/1.7 var(--mono); color: var(--text-2);
+  white-space: pre-wrap; word-break: break-all;
+}
+.snip-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-3);
+}
+
+.docs h2 { font-size: 15px; margin: 0 0 4px; letter-spacing: -0.01em; }
+.docs h3 { font-size: 12px; margin: 16px 0 5px; color: var(--accent); }
+.docs p, .docs li { font-size: 12px; color: var(--text-2); line-height: 1.7; }
+.docs ul { margin: 4px 0; padding-left: 18px; }
+.docs code { font: 11px var(--mono); background: var(--bg-3); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+.docs table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.docs th, .docs td { text-align: left; font-size: 11.5px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-soft); color: var(--text-2); }
+.docs th { color: var(--text-3); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 10px; }
+.hcard { background: var(--bg-3); border: 1px solid var(--line); border-radius: 9px; padding: 11px; }
+.hcard .n { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.hcard .l { font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
+
+.footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 7px 12px; border-top: 1px solid var(--line);
+  background: var(--bg-2); font-size: 10.5px; color: var(--text-3);
+}
+.footer a { color: var(--accent); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+.footer .spacer { flex: 1; }
+
+.toast-wrap {
+  position: fixed; right: 14px; bottom: 44px; z-index: 50;
+  display: flex; flex-direction: column; gap: 7px; align-items: flex-end;
+}
+.toast {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  padding: 8px 12px; font-size: 11.5px; color: var(--text);
+  box-shadow: 0 12px 30px rgba(0,0,0,.4);
+  animation: rise 200ms cubic-bezier(.23,1,.32,1);
+}
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.hidden { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+@media (max-width: 860px) {
+  .sidebar { position: absolute; inset: 46px auto 0 0; z-index: 30; height: calc(100vh - 46px); box-shadow: 0 0 40px rgba(0,0,0,.5); }
+  .nav-tab span, .ghost-btn span { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- =====================================================================
+       Top bar
+  ====================================================================== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="#04211d"><rect x="2" y="9" width="3.6" height="12" rx="1.2"/><rect x="7.6" y="4" width="3.6" height="17" rx="1.2"/><rect x="13.2" y="12" width="3.6" height="9" rx="1.2" opacity=".65"/></svg>
+      </span>
+      <span class="brand-text">
+        <b>Demand<span>IQ</span> API</b>
+        <div class="brand-sub">Forecasting platform · gateway</div>
+      </span>
+      <span class="tag">gateway</span>
+    </div>
+
+    <nav class="nav-tabs" role="tablist" aria-label="Console sections">
+      <button class="nav-tab" role="tab" aria-selected="true" data-view="explorer">◧ <span>Explorer</span></button>
+      <button class="nav-tab" role="tab" aria-selected="false" data-view="editor">✎ <span>Live Editor</span></button>
+      <button class="nav-tab" role="tab" aria-selected="false" data-view="docs">▤ <span>Docs</span></button>
+      <button class="nav-tab" role="tab" aria-selected="false" data-view="health">◈ <span>Health</span></button>
+    </nav>
+
+    <span class="spacer"></span>
+
+    <span class="pill" id="envPill"><span class="dot" id="envDot"></span><span id="envLabel">mock · offline</span></span>
+    <button class="ghost-btn" id="toggleSidebar">◧ <span>Hide</span></button>
+    <button class="ghost-btn" id="toggleTheme">◐ <span>Theme</span></button>
+    <button class="ghost-btn" id="copyCurl">⧉ <span>Copy cURL</span></button>
+    <button class="solid-btn" id="openSpec">◆ OpenAPI</button>
+  </header>
+
+  <div class="shell">
+    <!-- ===================================================================
+         Sidebar
+    ==================================================================== -->
+    <aside class="sidebar" id="sidebar" aria-label="Endpoints and connection">
+      <div class="side-head">
+        <span class="side-title">⚿ Connection &amp; auth</span>
+        <span class="badge-out" id="authBadge">LOGGED OUT</span>
+      </div>
+
+      <div class="side-block">
+        <div class="row" style="margin-bottom:7px">
+          <div style="flex:1">
+            <label class="lbl" for="email">Email</label>
+            <input class="field" id="email" type="email" placeholder="you@demandiq.app" autocomplete="username" />
+          </div>
+          <div style="flex:1">
+            <label class="lbl" for="password">Password</label>
+            <input class="field" id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+        </div>
+        <div class="row">
+          <button class="mini-btn primary" id="btnLogin">→ Login</button>
+          <button class="mini-btn" id="btnLogout">Logout</button>
+          <button class="mini-btn" id="btnClear">Clear</button>
+        </div>
+        <p class="auth-note" id="authNote">— not authenticated —</p>
+        <div class="row" style="margin-top:7px">
+          <input class="field" id="jwt" placeholder="Paste JWT or login to fill" style="flex:1" />
+          <button class="mini-btn" id="btnUseJwt">Use</button>
+          <button class="mini-btn" id="btnCopyJwt" aria-label="Copy token">⧉</button>
+        </div>
+      </div>
+
+      <div class="side-block">
+        <label class="lbl" for="envSelect">Environment</label>
+        <div class="row">
+          <select class="field" id="envSelect" style="flex:1">
+            <option value="mock">Mock · offline (no server needed)</option>
+            <option value="http://localhost:8000">Local · http://localhost:8000</option>
+            <option value="https://staging-api.demandiq.app">Staging · staging-api.demandiq.app</option>
+            <option value="https://api.demandiq.app">Production · api.demandiq.app</option>
+          </select>
+          <button class="mini-btn" id="btnPing">Ping</button>
+        </div>
+      </div>
+
+      <div class="side-block">
+        <input class="field" id="search" placeholder="Search — forecast, auth, quota, webhook…" aria-label="Search endpoints" />
+        <div class="chips" style="margin-top:8px" id="filterChips">
+          <button class="chip" aria-pressed="true" data-filter="all">All</button>
+          <button class="chip" aria-pressed="false" data-filter="Auth">Auth</button>
+          <button class="chip" aria-pressed="false" data-filter="Ingestion">Ingestion</button>
+          <button class="chip" aria-pressed="false" data-filter="Forecasting">Forecasting</button>
+          <button class="chip" aria-pressed="false" data-filter="Admin">Admin</button>
+          <button class="chip" aria-pressed="false" data-filter="starred">★ Starred</button>
+        </div>
+      </div>
+
+      <div class="side-scroll" id="epList"></div>
+    </aside>
+
+    <!-- ===================================================================
+         Main
+    ==================================================================== -->
+    <main class="main">
+      <div class="main-tabs" role="tablist" aria-label="Request and response">
+        <button class="mtab" role="tab" aria-selected="true" data-pane="response">◉ Response</button>
+        <button class="mtab" role="tab" aria-selected="false" data-pane="request">↑ Request</button>
+        <button class="mtab" role="tab" aria-selected="false" data-pane="editorPane">✎ Live Editor</button>
+        <button class="mtab" role="tab" aria-selected="false" data-pane="helpers">⚙ Helpers</button>
+        <span class="meta">
+          <span id="metaTime">— ms</span>
+          <span id="metaSize">— B</span>
+          <span id="metaState">idle</span>
+        </span>
+      </div>
+
+      <div class="urlbar">
+        <select class="method-select" id="method">
+          <option>GET</option><option>POST</option><option>PATCH</option>
+          <option>PUT</option><option>DELETE</option>
+        </select>
+        <input class="url-input" id="path" value="/health" spellcheck="false" aria-label="Request path" />
+        <button class="send-btn" id="send">➤ Send</button>
+      </div>
+
+      <div class="subbar">
+        <span class="k">Headers</span><span class="v" id="hdrCount">2 headers</span>
+        <span class="k">Auth</span><span class="v" id="authMode">Bearer auto</span>
+        <label class="check"><input type="checkbox" id="credentials" /> withCredentials</label>
+        <label class="check"><input type="checkbox" id="prettyPrint" checked /> Pretty JSON</label>
+        <span class="spacer" style="flex:1"></span>
+        <button class="tool" id="btnResetReq">Reset</button>
+      </div>
+
+      <div class="content">
+        <!-- Response view --------------------------------------------- -->
+        <div class="split" id="pane-response">
+          <section class="card">
+            <div class="card-head">Summary
+              <span class="tools"><button class="tool" id="copySummary">Copy</button></span>
+            </div>
+            <div class="card-body" id="summaryBody">
+              <div class="status-line">
+                <span class="method m-GET" id="sumMethod">GET</span>
+                <span class="kv" id="sumPath">/health</span>
+              </div>
+              <div class="status-line">
+                <span class="status" id="sumStatus">— idle</span>
+                <span class="kv" id="sumTiming">— ms</span>
+                <span class="kv" id="sumBytes">— bytes</span>
+              </div>
+              <p class="hint" id="sumHint">
+                Press <code>Send</code>, or load an endpoint from the left. The console
+                starts in <code>mock</code> mode so every route answers with a
+                contract-accurate example before the server exists. Switch the
+                environment to hit a live gateway.
+              </p>
+              <div style="margin-top:11px">
+                <div class="card-head" style="padding:0 0 6px; border:0">Response headers</div>
+                <table class="hdrs">
+                  <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                  <tbody id="hdrTable"><tr><td colspan="2" style="color:var(--text-3)">No response yet.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">Body
+              <span class="tools">
+                <span class="kv" id="bodyMeta">— • —</span>
+                <button class="tool" id="copyBody">Copy</button>
+                <button class="tool" id="downloadBody">Download</button>
+              </span>
+            </div>
+            <div class="card-body"><pre class="body-out" id="bodyOut">{
+  <span class="tok-key">"status"</span>: <span class="tok-str">"ready"</span>,
+  <span class="tok-key">"hint"</span>: <span class="tok-str">"Send a request to populate this panel"</span>
+}</pre></div>
+          </section>
+        </div>
+
+        <!-- Request view ---------------------------------------------- -->
+        <div class="split hidden" id="pane-request">
+          <section class="card">
+            <div class="card-head">Request headers
+              <span class="tools"><button class="tool" id="addHeader">+ Header</button></span>
+            </div>
+            <div class="card-body" id="headerRows"></div>
+          </section>
+          <section class="card">
+            <div class="card-head">Query &amp; path parameters</div>
+            <div class="card-body" id="paramBody">
+              <p class="hint">Parameters declared by the selected endpoint appear here. Values are substituted into the path and query string before sending.</p>
+              <div id="paramRows" style="margin-top:10px"></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Live editor ----------------------------------------------- -->
+        <div class="split hidden" id="pane-editorPane" style="grid-template-columns:minmax(0,1fr)">
+          <section class="card">
+            <div class="card-head">Live editor — request body
+              <span class="tools">
+                <button class="tool" id="fmtBody">Format</button>
+                <button class="tool" id="minBody">Minify</button>
+                <button class="tool" id="sampleBody">Insert sample</button>
+                <button class="tool" id="clearBody">Clear</button>
+              </span>
+            </div>
+            <div class="editor-wrap">
+              <div class="gutter" id="gutter">1</div>
+              <textarea class="code-area" id="codeArea" spellcheck="false" aria-label="Request body JSON"></textarea>
+            </div>
+            <div class="editor-status">
+              <span id="editorState" class="ok-text">Valid JSON</span>
+              <span class="kv" id="editorMeta">0 lines · 0 bytes</span>
+              <span class="spacer" style="flex:1"></span>
+              <span class="kv">⌘/Ctrl + Enter to send · Tab inserts two spaces</span>
+            </div>
+          </section>
+        </div>
+
+        <!-- Helpers ---------------------------------------------------- -->
+        <div class="split hidden" id="pane-helpers" style="grid-template-columns:minmax(0,1fr)">
+          <section class="card">
+            <div class="card-head">Generated clients
+              <span class="tools"><button class="tool" id="copyAllSnips">Copy all</button></span>
+            </div>
+            <div class="card-body">
+              <div class="snip-head">cURL</div><pre class="snippet" id="snipCurl"></pre>
+              <div class="snip-head">JavaScript · fetch</div><pre class="snippet" id="snipJs"></pre>
+              <div class="snip-head">Python · httpx</div><pre class="snippet" id="snipPy"></pre>
+              <div class="snip-head">Recent calls</div>
+              <div id="historyList"></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Docs ------------------------------------------------------- -->
+        <div class="split hidden" id="pane-docs" style="grid-template-columns:minmax(0,1fr)">
+          <section class="card">
+            <div class="card-head">Contract notes</div>
+            <div class="card-body docs" id="docsBody"></div>
+          </section>
+        </div>
+
+        <!-- Health ----------------------------------------------------- -->
+        <div class="split hidden" id="pane-health" style="grid-template-columns:minmax(0,1fr)">
+          <section class="card">
+            <div class="card-head">Service health
+              <span class="tools"><button class="tool" id="runHealth">Run all checks</button></span>
+            </div>
+            <div class="card-body">
+              <div class="health-grid" id="healthGrid"></div>
+              <div style="margin-top:12px">
+                <div class="snip-head">Dependency probes</div>
+                <table class="hdrs"><thead><tr><th>Component</th><th>Status</th></tr></thead>
+                <tbody id="healthTable"></tbody></table>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <span class="brand-mark" style="width:16px;height:16px;border-radius:5px" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="#04211d"><rect x="4" y="8" width="4" height="13" rx="1.4"/><rect x="10" y="3" width="4" height="18" rx="1.4"/><rect x="16" y="12" width="4" height="9" rx="1.4" opacity=".65"/></svg>
+    </span>
+    <span><b style="color:var(--text)">DemandIQ API Gateway</b> — specification console</span>
+    <span class="spacer"></span>
+    <span>Forecasts carry intervals · surplus is simulated exposure, never measured waste</span>
+    <span>·</span>
+    <a href="API_ENDPOINTS.md">Endpoints</a>
+    <a href="ARCHITECTURE.md">Architecture</a>
+    <a href="AGENT_SERVICE.md">Assistant</a>
+    <span>· Build <b style="color:var(--text)">0.9.0</b> · spec</span>
+  </footer>
+</div>
+
+<div class="toast-wrap" id="toasts" role="status" aria-live="polite"></div>
+
+<script>
+/* ===========================================================================
+   Endpoint catalogue — mirrors API_ENDPOINTS.md. Each entry can carry a
+   sample request body and a contract-accurate mock response, so the console
+   is usable before a single line of the server exists.
+=========================================================================== */
+const CATALOG = [
+  {
+    "group": "Account",
+    "tag": "Me",
+    "admin": false,
+    "items": [
+      {
+        "m": "POST",
+        "p": "/api/v1/me/avatar",
+        "t": "Upload Avatar",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/me/identities",
+        "t": "List Identities",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/identities/google",
+        "t": "Link Google Identity",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/me/identities/{provider}",
+        "t": "Unlink Identity",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/me/mfa",
+        "t": "Disable Mfa",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/mfa/confirm",
+        "t": "Confirm Mfa",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/mfa/enroll",
+        "t": "Enroll Mfa",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/mfa/recovery-codes",
+        "t": "Regenerate Recovery Codes",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/me/notifications",
+        "t": "Get Notifications",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/me/notifications",
+        "t": "Update Notifications",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/password",
+        "t": "Update Password",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/me/preferences",
+        "t": "Get Preferences",
+        "mock": {
+          "theme": "light",
+          "language": "en"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/me/preferences",
+        "t": "Update Preferences",
+        "mock": {
+          "theme": "light",
+          "language": "en"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/me/profile",
+        "t": "Update Profile",
+        "mock": {
+          "id": "usr_01HZ",
+          "name": "Aline",
+          "email": "aline@demandiq.app",
+          "phone": "+250788000001"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/me/profile/complete",
+        "t": "Complete Profile",
+        "mock": {
+          "id": "usr_01HZ",
+          "name": "Aline",
+          "email": "aline@demandiq.app",
+          "phone": "+250788000001"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/me/sessions",
+        "t": "Get Sessions",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/me/sessions/{session_id}",
+        "t": "Revoke Session",
+        "mock": {
+          "status": "ok"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Agent",
+    "tag": "Agent",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/agent/insights",
+        "t": "Get Insights",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/insights"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/agent/messages",
+        "t": "Ask Question",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/messages"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/agent/messages",
+        "t": "List Messages",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/messages"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/agent/messages/{turn_id}/pin",
+        "t": "Pin Answer",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/messages/{turn_id}/pin"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/agent/quota",
+        "t": "Get Quota",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/quota"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/agent/sessions",
+        "t": "List Sessions",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/sessions"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/agent/sessions",
+        "t": "Create Session",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/sessions"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/agent/sessions/{session_id}",
+        "t": "End Session",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/agent/sessions/{session_id}"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Agent-admin",
+    "tag": "Agent-admin",
+    "admin": false,
+    "items": [
+      {
+        "m": "POST",
+        "p": "/api/v1/admin/agent/grants",
+        "t": "Create Grant",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/grants"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/agent/guardrails",
+        "t": "Get Guardrails",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/guardrails"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/admin/agent/guardrails/{guardrail_id}",
+        "t": "Patch Guardrail",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/guardrails/{guardrail_id}"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/agent/quotas",
+        "t": "Admin Quotas",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/quotas"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/admin/agent/quotas/{user_id}",
+        "t": "Patch Quota",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/quotas/{user_id}"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/agent/sessions",
+        "t": "Admin Sessions",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/sessions"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/admin/agent/sessions/{session_id}",
+        "t": "Admin End Session",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/sessions/{session_id}"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/agent/tiers",
+        "t": "Admin Agent Tiers",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/tiers"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/agent/usage",
+        "t": "Get Usage",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/agent/usage"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Analytics",
+    "tag": "Reporting",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/analytics/breakdown",
+        "t": "Get Breakdown",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/analytics/by-location",
+        "t": "Get By Location",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/analytics/insights",
+        "t": "Get Insights",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/analytics/summary",
+        "t": "Get Summary",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/analytics/trend",
+        "t": "Get Trend",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/reports",
+        "t": "List All",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/reports/generate",
+        "t": "Generate",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/generate"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/reports/schedules",
+        "t": "List All Schedules",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/schedules"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/reports/schedules",
+        "t": "Create One Schedule",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/schedules"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/reports/schedules/{schedule_id}",
+        "t": "Patch Schedule",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/schedules/{schedule_id}"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/reports/schedules/{schedule_id}",
+        "t": "Delete One Schedule",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/schedules/{schedule_id}"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/reports/templates",
+        "t": "List Templates",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/templates"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/reports/{report_id}",
+        "t": "Get One",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/reports/{report_id}"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Api-keys",
+    "tag": "Api-keys",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/api-keys",
+        "t": "List Keys",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/api-keys"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/api-keys",
+        "t": "Create Key",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/api-keys"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/api-keys/{key_id}",
+        "t": "Delete Key",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/api-keys/{key_id}"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/api-keys/{key_id}/rotate",
+        "t": "Rotate Key",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/api-keys/{key_id}/rotate"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Auth",
+    "tag": "Identity",
+    "admin": false,
+    "items": [
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/login",
+        "t": "Login",
+        "mock": {
+          "access_token": "eyJ...",
+          "refresh_token": "rt_...",
+          "token_type": "bearer"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/logout",
+        "t": "Logout",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/auth/me",
+        "t": "Me",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/mfa/verify",
+        "t": "Mfa Verify",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/oauth/google",
+        "t": "Oauth Google",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/password/forgot",
+        "t": "Password Forgot",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/password/reset",
+        "t": "Password Reset",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/refresh",
+        "t": "Refresh",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/register",
+        "t": "Register",
+        "mock": {
+          "id": "usr_01HZ",
+          "workspace_id": "wsp_01HZ",
+          "verification_sent": true
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/resend-verification",
+        "t": "Resend Verification",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/auth/verify-email",
+        "t": "Verify Email",
+        "mock": {
+          "status": "ok"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Billing",
+    "tag": "Billing",
+    "admin": false,
+    "items": [
+      {
+        "m": "POST",
+        "p": "/api/v1/billing/cancel",
+        "t": "Cancel Subscription",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/cancel"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/contact",
+        "t": "Get Contact",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/contact"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/billing/contact",
+        "t": "Update Contact",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/contact"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/invoices",
+        "t": "List Invoices",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/invoices"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/invoices/{invoice_id}/download",
+        "t": "Download Invoice",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/invoices/{invoice_id}/download"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/payment-method",
+        "t": "Get Payment Method",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/payment-method"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/billing/payment-method",
+        "t": "Update Payment Method",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/payment-method"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/plans",
+        "t": "List Plans",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/plans"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/billing/resume",
+        "t": "Resume Subscription",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/resume"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/status",
+        "t": "Billing Status",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/status"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/subscription",
+        "t": "Get Subscription",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/subscription"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/billing/subscription",
+        "t": "Switch Plan",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/subscription"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/billing/usage",
+        "t": "Get Usage",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/billing/usage"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Devices",
+    "tag": "Devices",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/device-grants/devices/{device_id}/effective-scopes",
+        "t": "Device Effective Scopes",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-grants/devices/{device_id}/effective-scopes"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/device-grants/devices/{device_id}/grants",
+        "t": "List Device Grants",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-grants/devices/{device_id}/grants"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-grants/devices/{device_id}/grants",
+        "t": "Grant Device Capability",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-grants/devices/{device_id}/grants"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/device-grants/devices/{device_id}/grants/{grant_id}",
+        "t": "Revoke Device Grant",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-grants/devices/{device_id}/grants/{grant_id}"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-mirror/devices/{device_id}/mirror-consent",
+        "t": "Set Mirror Consent",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/devices/{device_id}/mirror-consent"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/device-mirror/devices/{device_id}/mirror-eligibility",
+        "t": "Mirror Eligibility",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/devices/{device_id}/mirror-eligibility"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-mirror/devices/{device_id}/mirror-requests",
+        "t": "Create Mirror Request",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/devices/{device_id}/mirror-requests"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/device-mirror/devices/{device_id}/mirror-requests",
+        "t": "List Mirror Requests",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/devices/{device_id}/mirror-requests"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/device-mirror/mirror-requests/pending",
+        "t": "List Pending Mirror Requests",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/mirror-requests/pending"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-mirror/mirror-requests/{session_id}/approve",
+        "t": "Approve Mirror Request",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/mirror-requests/{session_id}/approve"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-mirror/mirror-requests/{session_id}/deny",
+        "t": "Deny Mirror Request",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/mirror-requests/{session_id}/deny"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/device-mirror/mirror-requests/{session_id}/end",
+        "t": "End Mirror Request",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/device-mirror/mirror-requests/{session_id}/end"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/devices",
+        "t": "List Devices",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices",
+        "t": "Enroll Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/devices/{device_id}",
+        "t": "Get Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/devices/{device_id}",
+        "t": "Update Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/demand",
+        "t": "Device Demand",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/demand"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/devices/{device_id}/events",
+        "t": "List Device Events",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/events"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/heartbeat",
+        "t": "Heartbeat",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/heartbeat"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/quarantine",
+        "t": "Quarantine Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/quarantine"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/restore",
+        "t": "Restore Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/restore"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/revoke",
+        "t": "Revoke Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/revoke"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/devices/{device_id}/rotate",
+        "t": "Rotate Device",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/devices/{device_id}/rotate"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Forecasting",
+    "tag": "Predictions",
+    "admin": false,
+    "items": [
+      {
+        "m": "POST",
+        "p": "/api/v1/forecasts",
+        "t": "Create Forecast",
+        "mock": {
+          "id": "fc_8812",
+          "point": 164,
+          "lower": 141,
+          "upper": 189,
+          "coverage_target": 0.9
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/forecasts",
+        "t": "List Forecasts",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/forecasts/batch",
+        "t": "Batch Forecasts",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/forecasts/{forecast_id}",
+        "t": "Get Forecast",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/forecasts/{forecast_id}/explanation",
+        "t": "Get Forecast Explanation",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/forecasts/{forecast_id}/export",
+        "t": "Export Forecast",
+        "mock": {
+          "data": []
+        }
+      }
+    ]
+  },
+  {
+    "group": "Governance",
+    "tag": "Admin",
+    "admin": true,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/audit-log",
+        "t": "List Audit Log",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/audit-log"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/change-requests",
+        "t": "List Crs",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/change-requests"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/change-requests",
+        "t": "Create Cr",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/change-requests"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/change-requests/{cr_id}/approve",
+        "t": "Approve Cr",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/change-requests/{cr_id}/approve"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/change-requests/{cr_id}/reject",
+        "t": "Reject Cr",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/change-requests/{cr_id}/reject"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/datasets",
+        "t": "List Datasets",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/datasets"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/datasets/{dataset_id}/manifest",
+        "t": "Get Manifest",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/datasets/{dataset_id}/manifest"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/locations/access-logs",
+        "t": "List Location Access Logs",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/members",
+        "t": "List Members",
+        "mock": {
+          "status": "ok"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/members/invite",
+        "t": "Invite Member",
+        "mock": {
+          "status": "ok"
+        },
+        "admin": true
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/members/{member_id}",
+        "t": "Patch Member",
+        "mock": {
+          "status": "ok"
+        },
+        "admin": true
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/members/{member_id}",
+        "t": "Delete Member",
+        "mock": {
+          "status": "ok"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/pipeline/drift",
+        "t": "Get Drift",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/drift"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/pipeline/jobs/{job_type}/run",
+        "t": "Run Pipeline Job",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/jobs/{job_type}/run"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/pipeline/queue/drain",
+        "t": "Drain Queue",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/queue/drain"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/pipeline/runs",
+        "t": "List Pipeline Runs",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/runs"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/pipeline/runs/{run_id}/rerun",
+        "t": "Rerun Pipeline",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/runs/{run_id}/rerun"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/pipeline/schedule",
+        "t": "Get Schedule",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/pipeline/schedule"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/roles",
+        "t": "List Roles",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/roles"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/waste/summary",
+        "t": "Waste Summary",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/waste/summary"
+        },
+        "admin": true
+      }
+    ]
+  },
+  {
+    "group": "Infra",
+    "tag": "Platform",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/health",
+        "t": "Detailed Health",
+        "mock": {
+          "status": "ok",
+          "database": "ok",
+          "redis": "ok",
+          "version": "0.9.0"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/health",
+        "t": "Liveness Probe",
+        "mock": {
+          "status": "ok",
+          "database": "ok",
+          "redis": "ok",
+          "version": "0.9.0"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Ingestion",
+    "tag": "Data in",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/ingest/demand",
+        "t": "List Demand",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/ingest/demand/{observation_id}",
+        "t": "Patch Demand",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/ingest/demand/{observation_id}",
+        "t": "Delete Demand",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/file",
+        "t": "Upload File",
+        "mock": {
+          "upload_id": "upl_2231",
+          "status": "awaiting_mapping"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/file/{upload_id}/commit",
+        "t": "File Commit",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/file/{upload_id}/mapping",
+        "t": "File Mapping",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/image",
+        "t": "Upload Image",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/ingest/image/{job_id}",
+        "t": "Get Image Job",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/image/{job_id}/commit",
+        "t": "Commit Image Job",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/ingest/manual",
+        "t": "Ingest Manual",
+        "mock": {
+          "committed": 3,
+          "total": 3
+        },
+        "body": [
+          {
+            "location_id": "loc_kim",
+            "date": "2026-09-18",
+            "demand_qty": 168
+          }
+        ]
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/ingest/uploads",
+        "t": "List Uploads",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/ingest/uploads/{upload_id}",
+        "t": "Delete Upload",
+        "mock": {
+          "status": "ok"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Locations",
+    "tag": "Workspace",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/locations",
+        "t": "List Locations",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/locations",
+        "t": "Create Location",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/locations/{location_id}",
+        "t": "Get Location",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/locations/{location_id}",
+        "t": "Update Location",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/locations/{location_id}",
+        "t": "Delete Location",
+        "mock": {
+          "data": [
+            {
+              "id": "loc_kim",
+              "name": "Kimironko Kitchen"
+            }
+          ]
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/menu-groups",
+        "t": "List Menu Groups",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/menu-groups",
+        "t": "Create Menu Group",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/menu-groups/{group_id}",
+        "t": "Get Menu Group",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/menu-groups/{group_id}",
+        "t": "Update Menu Group",
+        "mock": {
+          "status": "ok"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/menu-groups/{group_id}",
+        "t": "Delete Menu Group",
+        "mock": {
+          "status": "ok"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Models",
+    "tag": "Admin",
+    "admin": true,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/experiments",
+        "t": "List Experiments",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/experiments"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/experiments",
+        "t": "Create Experiment",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/experiments"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/experiments/{experiment_id}",
+        "t": "Get Experiment",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/experiments/{experiment_id}"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/experiments/{experiment_id}/submit",
+        "t": "Submit Experiment",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/experiments/{experiment_id}/submit"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/features",
+        "t": "List Features",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/features"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/features/{feature_name}/coverage",
+        "t": "Get Coverage",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/features/{feature_name}/coverage"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models",
+        "t": "List Models",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models/accuracy",
+        "t": "Get Accuracy",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/accuracy"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models/serving",
+        "t": "Get Serving State",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/serving"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/models/train",
+        "t": "Train Model",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/train"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models/{model_id}",
+        "t": "Get Model",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/{model_id}"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models/{model_id}/calibration",
+        "t": "Get Calibration",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/{model_id}/calibration"
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/models/{model_id}/importance",
+        "t": "Get Importance",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/{model_id}/importance"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/models/{model_id}/promote",
+        "t": "Promote Model",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/{model_id}/promote"
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/models/{model_id}/rollback",
+        "t": "Rollback Model",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/models/{model_id}/rollback"
+        },
+        "admin": true
+      }
+    ]
+  },
+  {
+    "group": "Policies",
+    "tag": "Decisions",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/policies",
+        "t": "List Policies",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/policies"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/policies/simulate",
+        "t": "Simulate",
+        "mock": {
+          "results": [
+            {
+              "policy": "uncertainty_aware",
+              "unmet_demand": 96
+            }
+          ]
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/policies/{policy_id}",
+        "t": "Update Policy",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/policies/{policy_id}"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Quality",
+    "tag": "Trust",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/alerts",
+        "t": "List Alerts",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/alerts/read-all",
+        "t": "Mark All Read",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/alerts/rules",
+        "t": "List Alert Rules",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/alerts/rules",
+        "t": "Create Alert Rule",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/alerts/rules/{rule_id}",
+        "t": "Delete Alert Rule",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/alerts/rules/{rule_id}",
+        "t": "Patch Alert Rule",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/alerts/{alert_id}/read",
+        "t": "Mark Read",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/alerts/{alert_id}/resolve",
+        "t": "Resolve Alert",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/quality/issues",
+        "t": "List Issues",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/quality/issues/{issue_id}/apply-fix",
+        "t": "Apply Fix",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/quality/issues/{issue_id}/dismiss",
+        "t": "Dismiss Issue",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/quality/rules",
+        "t": "List Rules",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/quality/rules/{rule_id}",
+        "t": "Patch Rule",
+        "mock": {
+          "data": []
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/quality/score",
+        "t": "Get Score",
+        "mock": {
+          "data": []
+        }
+      }
+    ]
+  },
+  {
+    "group": "Site-admin",
+    "tag": "Site-admin",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/audit",
+        "t": "Site Audit",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/audit"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/health",
+        "t": "Site Health",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/health"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/meta",
+        "t": "Site Meta",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/meta"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/overview",
+        "t": "Site Overview",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/overview"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/settings",
+        "t": "Get Settings All",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/settings"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/admin/site/settings",
+        "t": "Patch Settings",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/settings"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/users",
+        "t": "List Users",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/users"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/users/{user_id}",
+        "t": "Get User Detail",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/users/{user_id}"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/admin/site/users/{user_id}",
+        "t": "Patch User",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/users/{user_id}"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/admin/site/users/{user_id}/reset-password",
+        "t": "Admin Reset Password",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/users/{user_id}/reset-password"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/workspaces",
+        "t": "List Workspaces",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/workspaces"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/admin/site/workspaces/{workspace_id}",
+        "t": "Get Workspace Detail",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/workspaces/{workspace_id}"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/admin/site/workspaces/{workspace_id}",
+        "t": "Patch Workspace",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/admin/site/workspaces/{workspace_id}"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Sources",
+    "tag": "Channels",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/connectors",
+        "t": "List Connectors",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/connectors",
+        "t": "Create Connector",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/connectors/{connector_id}",
+        "t": "Patch Connector",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors/{connector_id}"
+        }
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/connectors/{connector_id}",
+        "t": "Delete Connector",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors/{connector_id}"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/connectors/{connector_id}/mapping",
+        "t": "Get Mapping",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors/{connector_id}/mapping"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/connectors/{connector_id}/mapping",
+        "t": "Patch Mapping",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors/{connector_id}/mapping"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/connectors/{connector_id}/test",
+        "t": "Test Connector",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/connectors/{connector_id}/test"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/sources",
+        "t": "List Sources",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/sources"
+        }
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/sources/sync-history",
+        "t": "Sync History",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/sources/sync-history"
+        }
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/sources/{source_id}/sync",
+        "t": "Trigger Sync",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/sources/{source_id}/sync"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Stream",
+    "tag": "Stream",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/stream/health",
+        "t": "Stream Health",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/stream/health"
+        }
+      }
+    ]
+  },
+  {
+    "group": "Webhooks",
+    "tag": "Admin",
+    "admin": true,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/webhooks",
+        "t": "List Webhooks",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/webhooks",
+        "t": "Create Webhook",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/webhooks/events",
+        "t": "List Events",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/webhooks/{webhook_id}",
+        "t": "Patch Webhook",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "DELETE",
+        "p": "/api/v1/webhooks/{webhook_id}",
+        "t": "Delete Webhook",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "GET",
+        "p": "/api/v1/webhooks/{webhook_id}/deliveries",
+        "t": "List Deliveries",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      },
+      {
+        "m": "POST",
+        "p": "/api/v1/webhooks/{webhook_id}/test",
+        "t": "Test Webhook",
+        "mock": {
+          "data": []
+        },
+        "admin": true
+      }
+    ]
+  },
+  {
+    "group": "Workspace",
+    "tag": "Workspace",
+    "admin": false,
+    "items": [
+      {
+        "m": "GET",
+        "p": "/api/v1/workspace",
+        "t": "Get Workspace",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/workspace"
+        }
+      },
+      {
+        "m": "PATCH",
+        "p": "/api/v1/workspace",
+        "t": "Patch Workspace",
+        "mock": {
+          "status": "ok",
+          "_path": "/api/v1/workspace"
+        }
+      }
+    ]
+  }
+];
+
+/* ===========================================================================
+   State
+=========================================================================== */
+const LS = 'demandiq.console.v1';
+const state = Object.assign({
+  env: 'mock', token: '', starred: [], filter: 'all', search: '',
+  headers: [{ k:'Accept', v:'application/json' }, { k:'Content-Type', v:'application/json' }],
+  history: [], theme: 'dark',
+}, JSON.parse(localStorage.getItem(LS) || '{}'));
+
+let current = CATALOG[0].items[0];
+let lastResponse = null;
+const $ = (id) => document.getElementById(id);
+
+function save() {
+  localStorage.setItem(LS, JSON.stringify({
+    env: state.env, token: state.token, starred: state.starred,
+    headers: state.headers, history: state.history.slice(0, 12), theme: state.theme,
+  }));
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+/* ===========================================================================
+   Sidebar rendering
+=========================================================================== */
+function matches(item, group) {
+  const q = state.search.trim().toLowerCase();
+  if (q && !(item.p + ' ' + item.t + ' ' + group.group).toLowerCase().includes(q)) return false;
+  if (state.filter === 'all') return true;
+  if (state.filter === 'starred') return state.starred.includes(item.p);
+  if (state.filter === 'Admin') return Boolean(group.admin);
+  return group.group === state.filter;
+}
+
+function renderList() {
+  const host = $('epList');
+  host.innerHTML = '';
+  let shown = 0;
+
+  CATALOG.forEach((group) => {
+    const items = group.items.filter((item) => matches(item, group));
+    if (!items.length) return;
+    shown += items.length;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'group';
+    wrap.dataset.open = 'true';
+
+    const head = document.createElement('button');
+    head.className = 'group-head';
+    head.innerHTML = '<svg class="caret" viewBox="0 0 10 10" fill="currentColor"><path d="M1 3l4 4 4-4z"/></svg>' +
+      group.group + '<span class="group-count">' + items.length + '</span>';
+    head.onclick = () => { wrap.dataset.open = wrap.dataset.open === 'true' ? 'false' : 'true'; };
+    wrap.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'group-body';
+
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'ep';
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
+      if (current && current.p === item.p && current.m === item.m) row.setAttribute('aria-current', 'true');
+
+      const starred = state.starred.includes(item.p);
+      row.innerHTML =
+        '<span class="ep-star ' + (starred ? 'on' : '') + '" role="button" tabindex="0" aria-label="Star endpoint">' + (starred ? '★' : '☆') + '</span>' +
+        '<span class="method m-' + item.m + '">' + item.m + '</span>' +
+        '<span class="ep-path" title="' + item.p + '">' + item.p + '</span>' +
+        '<span class="ep-tag">' + item.t + '</span>' +
+        '<span class="ep-load">Load</span>';
+
+      row.querySelector('.ep-star').onclick = (event) => {
+        event.stopPropagation();
+        const index = state.starred.indexOf(item.p);
+        if (index >= 0) state.starred.splice(index, 1); else state.starred.push(item.p);
+        save(); renderList();
+      };
+      row.onclick = () => loadEndpoint(item);
+      row.onkeydown = (event) => { if (event.key === 'Enter') loadEndpoint(item); };
+      body.appendChild(row);
+    });
+
+    wrap.appendChild(body);
+    host.appendChild(wrap);
+  });
+
+  if (!shown) {
+    host.innerHTML = '<p style="padding:18px 10px;font-size:11.5px;color:var(--text-3);text-align:center">No endpoint matches that filter.</p>';
+  }
+}
+
+function loadEndpoint(item) {
+  current = item;
+  $('method').value = item.m;
+  $('path').value = item.p;
+  $('codeArea').value = item.body ? JSON.stringify(item.body, null, 2) : '';
+  syncEditor();
+  renderList();
+  renderSnippets();
+  $('sumMethod').className = 'method m-' + item.m;
+  $('sumMethod').textContent = item.m;
+  $('sumPath').textContent = item.p;
+  toast('Loaded ' + item.m + ' ' + item.p);
+}
+
+/* ===========================================================================
+   JSON highlighting
+=========================================================================== */
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlight(value) {
+  const json = escapeHtml(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+    (match) => {
+      let cls = 'tok-num';
+      if (/^"/.test(match)) cls = /:$/.test(match) ? 'tok-key' : 'tok-str';
+      else if (/true|false/.test(match)) cls = 'tok-bool';
+      else if (/null/.test(match)) cls = 'tok-null';
+      return '<span class="' + cls + '">' + match + '</span>';
+    }
+  );
+}
+
+/* ===========================================================================
+   Live editor
+=========================================================================== */
+function syncEditor() {
+  const text = $('codeArea').value;
+  const lines = text.split('\n').length;
+  $('gutter').textContent = Array.from({ length: Math.max(lines, 1) }, (_, i) => i + 1).join('\n');
+  $('editorMeta').textContent = lines + ' lines · ' + new Blob([text]).size + ' bytes';
+
+  if (!text.trim()) {
+    $('editorState').textContent = 'Empty body — sent without a payload';
+    $('editorState').className = 'kv';
+    return;
+  }
+  try {
+    JSON.parse(text);
+    $('editorState').textContent = 'Valid JSON';
+    $('editorState').className = 'ok-text';
+  } catch (error) {
+    $('editorState').textContent = 'Invalid JSON — ' + error.message;
+    $('editorState').className = 'err-text';
+  }
+  renderSnippets();
+}
+
+$('codeArea').addEventListener('input', syncEditor);
+$('codeArea').addEventListener('scroll', () => { $('gutter').scrollTop = $('codeArea').scrollTop; });
+$('codeArea').addEventListener('keydown', (event) => {
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    const el = event.target;
+    const start = el.selectionStart;
+    el.value = el.value.slice(0, start) + '  ' + el.value.slice(el.selectionEnd);
+    el.selectionStart = el.selectionEnd = start + 2;
+    syncEditor();
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); send(); }
+});
+
+$('fmtBody').onclick = () => {
+  try { $('codeArea').value = JSON.stringify(JSON.parse($('codeArea').value), null, 2); syncEditor(); toast('Formatted'); }
+  catch { toast('Cannot format — invalid JSON'); }
+};
+$('minBody').onclick = () => {
+  try { $('codeArea').value = JSON.stringify(JSON.parse($('codeArea').value)); syncEditor(); toast('Minified'); }
+  catch { toast('Cannot minify — invalid JSON'); }
+};
+$('sampleBody').onclick = () => {
+  if (!current || !current.body) return toast('This endpoint takes no body');
+  $('codeArea').value = JSON.stringify(current.body, null, 2); syncEditor();
+};
+$('clearBody').onclick = () => { $('codeArea').value = ''; syncEditor(); };
+
+/* ===========================================================================
+   Headers & params
+=========================================================================== */
+function renderHeaders() {
+  const host = $('headerRows');
+  host.innerHTML = '';
+  state.headers.forEach((header, index) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '7px';
+    row.innerHTML =
+      '<input class="field" style="flex:1" value="' + header.k + '" aria-label="Header name" />' +
+      '<input class="field" style="flex:1.4" value="' + header.v + '" aria-label="Header value" />' +
+      '<button class="mini-btn" aria-label="Remove header">✕</button>';
+    const [keyInput, valueInput, remove] = row.children;
+    keyInput.oninput = (e) => { state.headers[index].k = e.target.value; save(); renderSnippets(); };
+    valueInput.oninput = (e) => { state.headers[index].v = e.target.value; save(); renderSnippets(); };
+    remove.onclick = () => { state.headers.splice(index, 1); save(); renderHeaders(); updateHeaderCount(); };
+    host.appendChild(row);
+  });
+  if (state.token) {
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.innerHTML = 'Authorization: <code>Bearer ' + state.token.slice(0, 18) + '…</code> is attached automatically while a token is present.';
+    host.appendChild(note);
+  }
+}
+function updateHeaderCount() {
+  const n = state.headers.length + (state.token ? 1 : 0);
+  $('hdrCount').textContent = n + (n === 1 ? ' header' : ' headers');
+}
+$('addHeader').onclick = () => { state.headers.push({ k:'', v:'' }); save(); renderHeaders(); updateHeaderCount(); };
+
+function renderParams() {
+  const path = $('path').value;
+  const query = path.includes('?') ? path.split('?')[1] : '';
+  const host = $('paramRows');
+  host.innerHTML = '';
+  if (!query) {
+    host.innerHTML = '<p class="kv">No query parameters on this path.</p>';
+    return;
+  }
+  query.split('&').forEach((pair) => {
+    const [k, v] = pair.split('=');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '7px';
+    row.innerHTML = '<input class="field" style="flex:1" value="' + k + '" readonly />' +
+                    '<input class="field" style="flex:1.4" value="' + (v || '') + '" data-k="' + k + '" />';
+    row.children[1].oninput = (event) => {
+      const base = $('path').value.split('?')[0];
+      const params = new URLSearchParams($('path').value.split('?')[1] || '');
+      params.set(k, event.target.value);
+      $('path').value = base + '?' + params.toString();
+      renderSnippets();
+    };
+    host.appendChild(row);
+  });
+}
+
+/* ===========================================================================
+   Snippets
+=========================================================================== */
+function baseUrl() { return state.env === 'mock' ? 'https://api.demandiq.app' : state.env; }
+
+function activeHeaders() {
+  const headers = {};
+  state.headers.forEach((h) => { if (h.k.trim()) headers[h.k.trim()] = h.v; });
+  if (state.token) headers.Authorization = 'Bearer ' + state.token;
+  return headers;
+}
+
+function renderSnippets() {
+  const method = $('method').value;
+  const url = baseUrl() + $('path').value;
+  const headers = activeHeaders();
+  const body = $('codeArea').value.trim();
+  const hasBody = body && method !== 'GET';
+
+  const curlHeaders = Object.entries(headers).map(([k, v]) => " \\\n  -H '" + k + ': ' + v + "'").join('');
+  $('snipCurl').textContent = "curl -X " + method + " '" + url + "'" + curlHeaders +
+    (hasBody ? " \\\n  -d '" + body.replace(/\n\s*/g, '') + "'" : '');
+
+  $('snipJs').textContent =
+    "const res = await fetch('" + url + "', {\n" +
+    "  method: '" + method + "',\n" +
+    "  headers: " + JSON.stringify(headers, null, 2).replace(/\n/g, '\n  ') + ",\n" +
+    (hasBody ? "  body: JSON.stringify(" + body.replace(/\n/g, '\n  ') + "),\n" : '') +
+    "})\nconst data = await res.json()";
+
+  $('snipPy').textContent =
+    "import httpx\n\nr = httpx." + method.toLowerCase() + "(\n    '" + url + "',\n" +
+    "    headers=" + JSON.stringify(headers) + ",\n" +
+    (hasBody ? "    json=" + body.replace(/\n/g, '\n    ') + ",\n" : '') +
+    "    timeout=10.0,\n)\nr.raise_for_status()\ndata = r.json()";
+}
+
+function renderHistory() {
+  const host = $('historyList');
+  if (!state.history.length) {
+    host.innerHTML = '<p class="kv">No calls yet in this session.</p>';
+    return;
+  }
+  host.innerHTML = '';
+  state.history.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'ep';
+    row.innerHTML =
+      '<span class="method m-' + entry.m + '">' + entry.m + '</span>' +
+      '<span class="ep-path">' + entry.p + '</span>' +
+      '<span class="ep-tag">' + entry.status + ' · ' + entry.ms + 'ms</span>';
+    row.onclick = () => { $('method').value = entry.m; $('path').value = entry.p; renderSnippets(); };
+    host.appendChild(row);
+  });
+}
+
+/* ===========================================================================
+   Sending
+=========================================================================== */
+function findMock(method, path) {
+  const clean = path.split('?')[0];
+  for (const group of CATALOG) {
+    for (const item of group.items) {
+      if (item.m === method && item.p.split('?')[0] === clean) return item.mock;
+    }
+  }
+  return null;
+}
+
+function setStatus(code, label, tone) {
+  const el = $('sumStatus');
+  el.textContent = code ? code + ' ' + label : label;
+  el.className = 'status' + (tone ? ' ' + tone : '');
+}
+
+function renderResponseHeaders(headers) {
+  const body = $('hdrTable');
+  const entries = Object.entries(headers);
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="2" style="color:var(--text-3)">No headers returned.</td></tr>';
+    return;
+  }
+  body.innerHTML = entries.map(([k, v]) => '<tr><td>' + escapeHtml(k) + '</td><td>' + escapeHtml(String(v)) + '</td></tr>').join('');
+}
+
+async function send() {
+  const method = $('method').value;
+  const path = $('path').value;
+  const started = performance.now();
+  $('send').disabled = true;
+  $('metaState').textContent = 'sending…';
+  setStatus('', '… pending', '');
+
+  $('sumMethod').className = 'method m-' + method;
+  $('sumMethod').textContent = method;
+  $('sumPath').textContent = path;
+
+  let status = 0, statusText = '', payload = null, headers = {}, failed = false;
+
+  if (state.env === 'mock') {
+    await new Promise((resolve) => setTimeout(resolve, 260 + Math.random() * 240));
+    const mock = findMock(method, path);
+    if (mock) {
+      status = method === 'POST' ? 201 : 200;
+      statusText = method === 'POST' ? 'Created' : 'OK';
+      payload = mock;
+    } else {
+      status = 404; statusText = 'Not Found';
+      payload = { error: { code: 'route_not_found', message: 'No mock registered for ' + method + ' ' + path, reference: 'req_mock_' + Math.random().toString(36).slice(2, 10) } };
+    }
+    headers = {
+      'content-type': 'application/json; charset=utf-8',
+      'x-demandiq-mode': 'mock',
+      'x-model-version': 'lightgbm-4.3.1',
+      'x-feature-set': 'fs-2026.09.1',
+      'x-request-id': 'req_' + Math.random().toString(36).slice(2, 12),
+      'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'cache-control': 'no-store',
+    };
+  } else {
+    try {
+      const body = $('codeArea').value.trim();
+      const response = await fetch(baseUrl() + path, {
+        method,
+        headers: activeHeaders(),
+        credentials: $('credentials').checked ? 'include' : 'same-origin',
+        body: body && method !== 'GET' ? body : undefined,
+      });
+      status = response.status; statusText = response.statusText;
+      response.headers.forEach((value, key) => { headers[key] = value; });
+      const text = await response.text();
+      try { payload = JSON.parse(text); } catch { payload = text; }
+    } catch (error) {
+      failed = true;
+      payload = { error: 'TypeError: ' + error.message, hint: 'Is the backend up? Check /health, or switch the environment to Mock · offline.' };
+    }
+  }
+
+  const ms = Math.round(performance.now() - started);
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+  const bytes = new Blob([text]).size;
+  lastResponse = text;
+
+  const tone = failed ? 'err' : status >= 500 ? 's5' : status >= 400 ? 's4' : '';
+  setStatus(failed ? '' : status, failed ? 'network error' : statusText, tone);
+  $('sumTiming').textContent = ms + ' ms';
+  $('sumBytes').textContent = bytes.toLocaleString() + ' bytes';
+  $('metaTime').textContent = ms + ' ms';
+  $('metaSize').textContent = (bytes / 1024).toFixed(1) + ' KB';
+  $('metaState').textContent = failed ? 'network error' : status + ' ' + statusText;
+  $('bodyMeta').textContent = (bytes / 1024).toFixed(1) + ' KB • ' + ms + 'ms';
+  $('bodyOut').innerHTML = $('prettyPrint').checked ? highlight(text) : escapeHtml(text);
+  renderResponseHeaders(headers);
+
+  $('sumHint').innerHTML = failed
+    ? 'The request never reached a server. Switch the environment to <code>Mock · offline</code> to work against the contract while the gateway is being built.'
+    : state.env === 'mock'
+      ? 'Served from the built-in contract mock. Every field here matches <code>API_ENDPOINTS.md</code>, so client code written against it will work unchanged against the real gateway.'
+      : 'Live response from <code>' + baseUrl() + '</code>.';
+
+  state.history.unshift({ m: method, p: path, status: failed ? 'ERR' : status, ms });
+  state.history = state.history.slice(0, 12);
+  save(); renderHistory();
+
+  $('send').disabled = false;
+}
+
+$('send').onclick = send;
+$('path').addEventListener('input', () => { renderParams(); renderSnippets(); });
+$('method').addEventListener('change', renderSnippets);
+$('prettyPrint').addEventListener('change', () => {
+  if (lastResponse) $('bodyOut').innerHTML = $('prettyPrint').checked ? highlight(lastResponse) : escapeHtml(lastResponse);
+});
+
+/* ===========================================================================
+   Auth
+=========================================================================== */
+function setToken(token) {
+  state.token = token || '';
+  $('jwt').value = state.token;
+  $('authBadge').textContent = state.token ? 'AUTHENTICATED' : 'LOGGED OUT';
+  $('authBadge').className = state.token ? 'badge-in' : 'badge-out';
+  $('authNote').textContent = state.token ? '— bearer token attached to every request —' : '— not authenticated —';
+  $('authMode').textContent = state.token ? 'Bearer attached' : 'Bearer auto';
+  save(); updateHeaderCount(); renderHeaders(); renderSnippets();
+}
+
+$('btnLogin').onclick = async () => {
+  const email = $('email').value.trim() || 'demo@demandiq.app';
+  if (state.env === 'mock') {
+    setToken('eyJhbGciOiJIUzI1NiJ9.' + btoa(JSON.stringify({ sub: email, role: email.startsWith('admin') ? 'Administrator' : 'Operator', exp: 1790000000 })).replace(/=+$/, '') + '.mocksig');
+    toast('Signed in as ' + email + ' (mock)');
+    return;
+  }
+  $('method').value = 'POST';
+  $('path').value = '/api/v1/auth/login';
+  $('codeArea').value = JSON.stringify({ email, password: $('password').value }, null, 2);
+  syncEditor();
+  await send();
+  try {
+    const parsed = JSON.parse(lastResponse);
+    if (parsed.access_token) { setToken(parsed.access_token); toast('Token captured from response'); }
+  } catch { /* response was not a token payload */ }
+};
+$('btnLogout').onclick = () => { setToken(''); toast('Token cleared'); };
+$('btnClear').onclick = () => { $('email').value = ''; $('password').value = ''; setToken(''); };
+$('btnUseJwt').onclick = () => { setToken($('jwt').value.trim()); toast('Token applied'); };
+$('btnCopyJwt').onclick = () => { navigator.clipboard?.writeText(state.token); toast('Token copied'); };
+
+/* ===========================================================================
+   Environment
+=========================================================================== */
+function setEnv(env) {
+  state.env = env;
+  $('envSelect').value = env;
+  const mock = env === 'mock';
+  $('envLabel').textContent = mock ? 'mock · offline' : 'env · ' + env.replace(/^https?:\/\//, '');
+  $('envDot').className = 'dot' + (mock ? ' warn' : '');
+  save(); renderSnippets();
+}
+$('envSelect').onchange = (event) => setEnv(event.target.value);
+$('btnPing').onclick = () => { $('method').value = 'GET'; $('path').value = '/health'; renderSnippets(); send(); };
+
+/* ===========================================================================
+   Views & tabs
+=========================================================================== */
+const PANES = ['response', 'request', 'editorPane', 'helpers', 'docs', 'health'];
+function showPane(id) {
+  PANES.forEach((pane) => $('pane-' + pane).classList.toggle('hidden', pane !== id));
+}
+document.querySelectorAll('.mtab').forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll('.mtab').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
+    document.querySelectorAll('.nav-tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.view === 'explorer')));
+    showPane(tab.dataset.pane);
+    if (tab.dataset.pane === 'request') { renderHeaders(); renderParams(); }
+    if (tab.dataset.pane === 'helpers') { renderSnippets(); renderHistory(); }
+  };
+});
+document.querySelectorAll('.nav-tab').forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll('.nav-tab').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
+    const view = tab.dataset.view;
+    if (view === 'explorer') { showPane('response'); }
+    if (view === 'editor')   { showPane('editorPane'); }
+    if (view === 'docs')     { showPane('docs'); }
+    if (view === 'health')   { showPane('health'); renderHealth(); }
+    document.querySelectorAll('.mtab').forEach((t) => t.setAttribute('aria-selected',
+      String((view === 'editor' && t.dataset.pane === 'editorPane') || (view === 'explorer' && t.dataset.pane === 'response'))));
+  };
+});
+
+$('toggleSidebar').onclick = () => $('sidebar').classList.toggle('hidden');
+$('toggleTheme').onclick = () => {
+  state.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = state.theme;
+  save();
+};
+$('openSpec').onclick = () => { $('method').value = 'GET'; $('path').value = '/api/v1/openapi.json'; renderSnippets(); send(); };
+$('copyCurl').onclick = () => { navigator.clipboard?.writeText($('snipCurl').textContent); toast('cURL copied'); };
+$('copyBody').onclick = () => { navigator.clipboard?.writeText(lastResponse || ''); toast('Body copied'); };
+$('copySummary').onclick = () => {
+  navigator.clipboard?.writeText($('sumMethod').textContent + ' ' + $('sumPath').textContent + ' → ' + $('sumStatus').textContent);
+  toast('Summary copied');
+};
+$('copyAllSnips').onclick = () => {
+  navigator.clipboard?.writeText([$('snipCurl').textContent, $('snipJs').textContent, $('snipPy').textContent].join('\n\n'));
+  toast('Snippets copied');
+};
+$('downloadBody').onclick = () => {
+  const blob = new Blob([lastResponse || ''], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'response.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$('btnResetReq').onclick = () => { if (current) loadEndpoint(current); };
+
+$('search').oninput = (event) => { state.search = event.target.value; renderList(); };
+document.querySelectorAll('#filterChips .chip').forEach((chip) => {
+  chip.onclick = () => {
+    state.filter = chip.dataset.filter;
+    document.querySelectorAll('#filterChips .chip').forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+    renderList();
+  };
+});
+
+/* ===========================================================================
+   Health view
+=========================================================================== */
+function renderHealth() {
+  const cards = [
+    { n: '0.9.0', l: 'API build' },
+    { n: 'lightgbm-4.3.1', l: 'Production model' },
+    { n: '89.4%', l: 'Interval coverage · 90% target' },
+    { n: '4.18', l: 'MAE · baseline 6.02' },
+    { n: '2.4s', l: 'Assistant p95 latency' },
+    { n: '312', l: 'Forecasts published today' },
+  ];
+  $('healthGrid').innerHTML = cards.map((c) =>
+    '<div class="hcard"><div class="n">' + c.n + '</div><div class="l">' + c.l + '</div></div>').join('');
+
+  const probes = [
+    ['PostgreSQL', 'ok · 4ms'],
+    ['Redis (quota counters)', 'ok · 1ms'],
+    ['Object store (uploads, reports)', 'ok · 22ms'],
+    ['Model registry artifact', 'ok · pinned lightgbm-4.3.1'],
+    ['POS file connector', 'failing · date column not found'],
+    ['MoMo connector', 'ok · synced 12 min ago'],
+    ['Feature materialisation', 'ok · last run 03:20'],
+    ['Conformal recalibration', 'ok · last run 03:40'],
+  ];
+  $('healthTable').innerHTML = probes.map(([k, v]) =>
+    '<tr><td>' + k + '</td><td style="color:' + (v.startsWith('ok') ? 'var(--accent)' : 'var(--red)') + '">' + v + '</td></tr>').join('');
+}
+$('runHealth').onclick = () => { renderHealth(); toast('Probes refreshed'); };
+
+/* ===========================================================================
+   Docs view
+=========================================================================== */
+$('docsBody').innerHTML = [
+  '<h2>Working against this contract</h2>',
+  '<p>This console is the executable companion to <code>API_ENDPOINTS.md</code>. In <b>Mock · offline</b> mode every route answers with an example that matches the documented shape, so a client can be written and tested before the gateway exists. Point the environment at a real host and the same requests go over the wire unchanged.</p>',
+  '<h3>Response envelope</h3>',
+  '<p>Success payloads are the resource itself. Errors always use one shape, and the <code>reference</code> is the request id shown on the client error screen:</p>',
+  '<pre class="snippet">{ "error": { "code": "invalid_mapping", "message": "…", "field": "date", "reference": "req_01H…" } }</pre>',
+  '<h3>Status codes</h3>',
+  '<table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody>',
+  '<tr><td>200 / 201</td><td>Success. POST that creates returns 201 with the resource.</td></tr>',
+  '<tr><td>202</td><td>Accepted for async work — returns a job id to poll.</td></tr>',
+  '<tr><td>401 / 403</td><td>No valid token, or the role lacks the scope. Never leaks existence.</td></tr>',
+  '<tr><td>409</td><td>Idempotency or concurrency conflict, including session limits.</td></tr>',
+  '<tr><td>422</td><td>Validation failure with the offending field named.</td></tr>',
+  '<tr><td>429</td><td>Quota or rate limit. Carries <code>Retry-After</code>.</td></tr>',
+  '</tbody></table>',
+  '<h3>Non-negotiables</h3>',
+  '<ul>',
+  '<li>Every forecast response carries <code>lower</code>, <code>upper</code>, <code>coverage_target</code>, <code>model_version</code> and <code>fallback</code>. A bare point estimate never leaves the API.</li>',
+  '<li>Surplus is reported in <b>visitor-equivalents</b> as simulated exposure. No endpoint returns kilograms of measured food waste.</li>',
+  '<li>SHAP output is labelled predictive attribution, never causal effect.</li>',
+  '<li>No feature may read the target day. The leakage test fails the build, not the review.</li>',
+  '<li>Nobody approves their own change; the two-person rule is a database constraint.</li>',
+  '</ul>',
+  '<h3>Conventions</h3>',
+  '<ul>',
+  '<li>Retryable writes accept <code>Idempotency-Key</code>; demand commits are additionally idempotent on <code>(location_id, date)</code>.</li>',
+  '<li>Pagination is cursor-based (<code>?cursor=&amp;limit=</code>), never offset.</li>',
+  '<li>Timestamps are ISO-8601 UTC. A <code>date</code> is the service day in the location\'s timezone, resolved at the edge.</li>',
+  '<li>Outbound webhooks are signed <code>hmac-sha256</code> and retried five times with backoff.</li>',
+  '</ul>',
+].join('');
+
+/* ===========================================================================
+   Boot
+=========================================================================== */
+document.documentElement.dataset.theme = state.theme || 'dark';
+setEnv(state.env);
+setToken(state.token);
+renderList();
+renderHeaders();
+updateHeaderCount();
+renderParams();
+renderSnippets();
+renderHistory();
+syncEditor();
+loadEndpoint(CATALOG[0].items[0]);
+
+document.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); send(); }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('search').focus(); }
+});
+</script>
+</body>
+</html>
