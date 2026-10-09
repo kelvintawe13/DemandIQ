@@ -148,7 +148,10 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
 
     # The requested seat is capped by the platform ``default_role`` setting:
     # a new sign-up may never claim a seat above it (platform trust ladder).
-    default_role_raw = str(get_platform_setting(db, "default_role") or "viewer")
+    # Missing setting → ``owner``: an organisation bringing its operation onto
+    # the platform must own its workspace; the trust ladder still caps any
+    # *requested* seat to whatever the platform admin configured.
+    default_role_raw = str(get_platform_setting(db, "default_role") or "owner")
     try:
         default_role = UserRole(default_role_raw)
     except ValueError:
