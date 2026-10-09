@@ -16,6 +16,9 @@ import { AuthField } from '../../components/auth/AuthField';
 import { useLegal } from '../../contexts/LegalContext';
 import { AuthSelect } from '../../components/auth/AuthSelect';
 import { GoogleButton } from '../../components/auth/GoogleButton';
+import { isGoogleConfigured } from '../../lib/google';
+import { useSiteMeta } from '../../contexts/SiteMetaContext';
+import { Rise } from '../../components/ui/Rise';
 import { TurnstileWidget } from '../../components/auth/TurnstileWidget';
 import { isTurnstileEnabled } from '../../lib/turnstile';
 import { KitchenGrowthArt } from '../../components/illustrations/AuthArt';
@@ -75,6 +78,7 @@ function mapDailyCovers(v: string): number | undefined {
 
 export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpProps) {
   const { openLegal } = useLegal();
+  const { meta } = useSiteMeta();
   const { toast } = useToast();
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -202,8 +206,16 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
       try {
         localStorage.setItem('demandiq_pending_email', email.trim().toLowerCase());
       } catch {}
-      toast('Account created. Check your email for a code.', 'success');
-      onNavigateAuth('verify');
+      // With SMTP unconfigured the backend creates the account verified and
+      // reports email_verification_required=false — skip the code screen
+      // instead of sending the user somewhere their email will never arrive.
+      if (meta?.email_verification_required) {
+        toast('Account created. Check your email for a code.', 'success');
+        onNavigateAuth('verify');
+      } else {
+        toast('Account created — sign in to continue.', 'success');
+        onNavigateAuth('signin');
+      }
     } catch (e) {
       if (e instanceof ApiException) {
         const msg = e.reference ? `${e.error.message} (ref: ${e.error.reference})` : e.error.message;
@@ -294,22 +306,26 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
 
       {step === 1 &&
       <>
-          <div className="mt-4">
-            <GoogleButton
-            label="Sign up with Google"
-            mode="signup"
-            onSuccess={handleGoogleSuccess} />
-          
-          </div>
-          <div className="my-3.5 flex items-center gap-3">
-            <span className="h-px flex-1 bg-slate-200" />
-            <span className="text-caption text-slate-500">or use your email</span>
-            <span className="h-px flex-1 bg-slate-200" />
-          </div>
+          {isGoogleConfigured() && (
+            <>
+              <div className="mt-4">
+                <GoogleButton
+                  label="Sign up with Google"
+                  mode="signup"
+                  onSuccess={handleGoogleSuccess} />
+              </div>
+              <div className="my-3.5 flex items-center gap-3">
+                <span className="h-px flex-1 bg-slate-200" />
+                <span className="text-caption text-slate-500">or use your email</span>
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+            </>
+          )}
         </>
       }
 
       {step === 1 ?
+      <Rise delay={0.05}>
       <form className="flex flex-col gap-3" onSubmit={submitStepOne} noValidate>
           <AuthField
           id="signup-name"
@@ -379,13 +395,15 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
 
           <button
           type="submit"
-          className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-2.5 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+          className="btn-rail mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-2.5 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
           
             Continue
             <ArrowRightIcon className="h-4 w-4" strokeWidth={2} />
           </button>
-        </form> :
+        </form>
+        </Rise> :
 
+      <Rise delay={0.05}>
       <form className="mt-5 flex flex-col gap-3" onSubmit={submitStepTwo} noValidate>
           <AuthField
           id="signup-business"
@@ -522,12 +540,13 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
             <button
             type="submit"
             disabled={loading}
-            className="inline-flex flex-1 items-center justify-center rounded-xl bg-brand-700 px-4 py-2.5 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100">
+            className="btn-rail inline-flex flex-1 items-center justify-center rounded-xl bg-brand-700 px-4 py-2.5 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100">
             
               {loading ? 'Creating…' : 'Create account'}
             </button>
           </div>
         </form>
+        </Rise>
       }
 
       <p className="mt-3.5 text-center text-body-sm text-slate-600">

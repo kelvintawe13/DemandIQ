@@ -151,4 +151,6 @@ def test_meta_public_subset():
         "announcement": "Hello site",
         "support_email": "support@demandiq.app",
         "maintenance_mode": True,
+        # SMTP is unconfigured in tests → sign-up skips the emailed-code screen.
+        "email_verification_required": False,
     }

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ShieldIcon } from 'lucide-react';
 import { TURNSTILE_SITE_KEY, loadTurnstileScript } from '../../lib/turnstile';
 
 interface TurnstileWidgetProps {
@@ -81,17 +80,12 @@ export function TurnstileWidget({ onVerify, onExpire, error }: TurnstileWidgetPr
     };
   }, [handleToken]);
 
-  // No site key configured — silent placeholder footprint (dev only).
+  // No site key configured — render nothing at all (product decision: never
+  // show a human-check panel that is not actually checking anything). The
+  // backend skips verification when TURNSTILE_SECRET is unset, so the form
+  // simply submits without a challenge in this environment.
   if (!TURNSTILE_SITE_KEY) {
-    return (
-      <div className="flex h-[64px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3">
-        <ShieldIcon aria-hidden="true" className="h-5 w-5 shrink-0 text-slate-300" strokeWidth={1.8} />
-        <span className="text-body-xs font-medium text-slate-500">
-          Human check is disabled in this environment
-          <span className="block text-fine font-normal text-slate-500/80">Set VITE_TURNSTILE_SITE_KEY to enable</span>
-        </span>
-      </div>
-    );
+    return null;
   }
 
   return (

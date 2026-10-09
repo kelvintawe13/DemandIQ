@@ -697,6 +697,11 @@ def get_site_meta(db: Session) -> dict[str, Any]:
         "announcement": str(get_platform_setting(db, "announcement") or ""),
         "support_email": str(get_platform_setting(db, "support_email") or "support@demandiq.app"),
         "maintenance_mode": bool(get_platform_setting(db, "maintenance_mode")),
+        # Whether sign-up must pass through the emailed-code screen. False when
+        # SMTP is unconfigured: no code can be delivered, so register() creates
+        # accounts verified and the client skips the step entirely — a screen
+        # whose email will never arrive is a dead end, not a security layer.
+        "email_verification_required": bool(get_settings().smtp_host),
     }
 
 

@@ -6,6 +6,8 @@ export interface SiteMeta {
   announcement: string;
   support_email: string;
   maintenance_mode: boolean;
+  /** False when SMTP is unconfigured: sign-up skips the emailed-code screen. */
+  email_verification_required: boolean;
 }
 
 interface SiteMetaContextValue {

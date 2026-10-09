@@ -246,22 +246,13 @@ export function GoogleButton({ label, mode = 'signin', onSuccess, intent = 'logi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, originBlocked, configured]);
 
-  // Not configured at build time — explain rather than silently hiding
-  if (!configured && !originBlocked) {
-    // Still render the disabled fallback so layout doesn't jump, but with
-    // the "not configured" message exposed as `error`.
-    // We set the error lazily to avoid setting state during render.
-  }
+  // Not configured at build time — hide the button entirely (product decision:
+  // an auth screen must not offer a sign-in path that cannot work). The
+  // origin-blocked state below still renders its explanation, because that
+  // one is actionable by the deployer.
+  if (!configured) return null;
 
-  useEffect(() => {
-    if (!configured && !originBlocked) {
-      setError(
-        'Google sign-in is not configured for this deployment (VITE_GOOGLE_CLIENT_ID missing). Email/password sign-in still works.',
-      );
-    }
-  }, [configured, originBlocked]);
-
-  const showDisabled = originBlocked || !configured;
+  const showDisabled = originBlocked;
 
   return (
     <div>

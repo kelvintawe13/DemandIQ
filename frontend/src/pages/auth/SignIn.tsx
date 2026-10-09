@@ -12,8 +12,10 @@ import { AuthField } from '../../components/auth/AuthField';
 import { TurnstileWidget } from '../../components/auth/TurnstileWidget';
 import { isTurnstileEnabled } from '../../lib/turnstile';
 import { GoogleButton } from '../../components/auth/GoogleButton';
+import { isGoogleConfigured } from '../../lib/google';
+import { Rise } from '../../components/ui/Rise';
 import { DashboardArt } from '../../components/illustrations/AuthArt';
-import { demoAccounts, findDemoAccount } from '../../data/demoAccount';
+import { findDemoAccount } from '../../data/demoAccount';
 import type { DemoAccount } from '../../data/demoAccount';
 import { api, ApiException, setToken } from '../../api/client';
 import { useToast } from '../../contexts/ToastContext';
@@ -252,20 +254,8 @@ export function SignIn({
         else if (field) setFieldErrors({ [field]: e.error.message } as any);
         toast(msg, 'error');
       } else {
-        // network / offline: fallback to demoAccounts if possible
-        const account = findDemoAccount(email, password);
-        const isNetwork = !(e instanceof ApiException);
-        const baseEmpty = !(import.meta.env.VITE_API_URL as string | undefined);
-        if (account && (isNetwork || baseEmpty)) {
-          setOffline(true);
-          toast('Backend unreachable. Using demo account (offline).', 'info');
-          if (account.role === 'Administrator') {
-            onChallenge(account);
-            return;
-          }
-          onSignIn(account);
-          return;
-        }
+        // Network / offline — surface it plainly; sign-in has no demo
+        // fallback anymore (real accounts only).
         const msg = e instanceof Error ? e.message : 'Network error: backend unreachable';
         setGeneralError(msg);
         setOffline(true);
@@ -303,6 +293,7 @@ export function SignIn({
       </div>
       }
 
+      <Rise delay={0.08}>
       <form className="mt-5 flex flex-col gap-3" onSubmit={handleSubmit} noValidate>
         <AuthField
           id="signin-email"
@@ -362,33 +353,6 @@ export function SignIn({
           </label>
         </div>
 
-        {/* One seat per role, so every part of the platform can be reviewed
-            without hunting for credentials. Clicking fills the form; the role
-            still has to solve the captcha and sign in for real. */}
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-          <div className="mb-1.5 flex items-baseline justify-between gap-2">
-            <span className="text-fine font-semibold uppercase tracking-wide text-slate-500">Demo accounts</span>
-            <span className="text-fine text-slate-500">same workspace, one per role</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {demoAccounts.map((seat) =>
-            <button
-              key={seat.id}
-              type="button"
-              title={`${seat.email} · ${seat.blurb}`}
-              onClick={() => {
-                setEmail(seat.email);
-                setPassword(seat.password);
-                setFieldErrors({});
-                toast(`${seat.role} credentials filled. Solve the captcha and sign in.`, 'info');
-              }}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-micro font-semibold text-slate-600 transition-colors duration-150 ease-out hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-              {seat.role}
-            </button>
-            )}
-          </div>
-        </div>
-
         {generalError && !offline &&
         <EmptyState
             variant="error"
@@ -403,37 +367,42 @@ export function SignIn({
             size="sm"
             title="Backend unreachable"
             description={generalError}
-            hints={['Check VITE_API_URL: using demo accounts offline', 'Start the backend at http://localhost:8000']} />
+            hints={['Check VITE_API_URL points at the API', 'Start the backend at http://localhost:8000']} />
         }
         {offline && !generalError &&
         <EmptyState
             variant="offline"
             size="sm"
             title="Offline mode"
-            description="Backend unreachable. Demo accounts available offline."
-            hints={['VITE_API_URL not reachable, falling back to demo accounts']} />
+            description="Backend unreachable. Check your connection and try again."
+            hints={['VITE_API_URL not reachable']} />
         }
 
         <button
           type="submit"
           disabled={loading}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-control font-semibold text-white transition-colors duration-150 ease-out hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60">
+          className="btn-rail inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-control font-semibold text-white transition-colors duration-150 ease-out hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60">
           
           {loading ? 'Signing in…' : 'Sign In'}
           {!loading && <ArrowRightIcon className="h-4 w-4" strokeWidth={2} />}
         </button>
       </form>
+      </Rise>
 
-      <div className="my-3.5 flex items-center gap-3">
-        <span className="h-px flex-1 bg-slate-200" />
-        <span className="text-micro text-slate-500">or continue with</span>
-        <span className="h-px flex-1 bg-slate-200" />
-      </div>
+      {isGoogleConfigured() && (
+        <>
+          <div className="my-3.5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-slate-200" />
+            <span className="text-micro text-slate-500">or continue with</span>
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
 
-      <GoogleButton
-        label="Sign in with Google"
-        mode="signin"
-        onSuccess={handleGoogleSuccess} />
+          <GoogleButton
+            label="Sign in with Google"
+            mode="signin"
+            onSuccess={handleGoogleSuccess} />
+        </>
+      )}
       
 
       <button

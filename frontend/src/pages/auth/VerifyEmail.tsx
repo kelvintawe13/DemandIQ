@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ShieldCheckIcon, ArrowLeftIcon } from 'lucide-react';
 import { AuthLayout } from '../../components/auth/AuthLayout';
 import { ShieldCodeArt } from '../../components/illustrations/AuthArt';
 import { api, ApiException } from '../../api/client';
 import { useToast } from '../../contexts/ToastContext';
+import { useSiteMeta } from '../../contexts/SiteMetaContext';
 import { EmptyState } from '../../components/ui/EmptyState';
 
 interface VerifyEmailProps {
@@ -14,6 +15,12 @@ const CODE_LENGTH = 6;
 
 export function VerifyEmail({ onNavigateAuth }: VerifyEmailProps) {
   const { toast } = useToast();
+  const { meta } = useSiteMeta();
+  // Verification only exists when the backend can deliver a code (SMTP
+  // configured). A direct hit on this screen otherwise goes back to sign-in.
+  useEffect(() => {
+    if (meta && !meta.email_verification_required) onNavigateAuth('signin');
+  }, [meta, onNavigateAuth]);
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [fieldError, setFieldError] = useState<string | undefined>();
   const [generalError, setGeneralError] = useState<string | undefined>();

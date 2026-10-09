@@ -6,7 +6,8 @@
  * exporting a plain function beside a component defeats Fast Refresh
  * (eslint-plugin-react-refresh's `only-export-components`).
  *
- * Without `VITE_TURNSTILE_SITE_KEY` the widget renders a placeholder, and
+ * Without `VITE_TURNSTILE_SITE_KEY` the widget renders nothing at all (a human
+ * check that checks nothing is worse than none), and
  * `backend/app/security/human.py` skips verification when its TURNSTILE_SECRET
  * is unset — so local dev stays frictionless while production enforces a real
  * challenge on both ends.

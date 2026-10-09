@@ -170,13 +170,18 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         else default_role
     )
 
+    cfg = get_settings()
     user = User(
         workspace_id=workspace.id,
         name=payload.name,
         email=payload.email.lower(),
         password_hash=hash_password(payload.password),
         role=role,  # type: ignore[assignment]
-        email_verified=False,
+        # Verification only means something when a code can actually be
+        # delivered. With SMTP unconfigured the account is created verified so
+        # sign-up never dead-ends on a screen whose email will never arrive;
+        # mirrors ``email_verification_required`` in get_site_meta().
+        email_verified=not bool(cfg.smtp_host),
         # Email sign-ups supply name/business at registration — no gate.
         profile_completed=True,
     )
