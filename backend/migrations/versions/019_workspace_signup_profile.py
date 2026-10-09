@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "019_workspace_signup_profile"
 down_revision = "018_dark_theme_default"
@@ -29,7 +30,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("workspaces", sa.Column("location_count", sa.Integer(), nullable=True))
     op.add_column("workspaces", sa.Column("daily_covers", sa.Integer(), nullable=True))
-    op.add_column("workspaces", sa.Column("data_sources", sa.JSON(), nullable=True))
+    op.add_column("workspaces", sa.Column("data_sources", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True))
 
 
 def downgrade() -> None:

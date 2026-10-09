@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ArrowLeftIcon, CheckCircle2Icon, ClockIcon, MapPinIcon, UsersIcon } from 'lucide-react';
+import { useSession, type SignupProfile } from '../../contexts/SessionContext';
 import { Panel } from '../../components/ui/Panel';
 import { LocationFields } from '../../components/locations/LocationFields';
 import { api, ApiException } from '../../api/client';
@@ -31,7 +32,31 @@ import {
  * destination.
  */
 export function AddLocation({ onNavigate }: { onNavigate?: (id: string) => void }) {
-  const [draft, setDraft] = useState<LocationForm>(emptyLocationForm);
+  const { user } = useSession();
+  const [draft, setDraft] = useState<LocationForm>(() => {
+    // Prefill from what the organisation answered at signup (persisted on
+    // the workspace since migration 019): the business type hints cuisine
+    // and service style, the promised daily covers seed seating capacity.
+    const signup = (user as { signupProfile?: SignupProfile })?.signupProfile;
+    if (!signup) return emptyLocationForm;
+    const bt = signup.businessType;
+    return {
+      ...emptyLocationForm,
+      cuisine:
+        bt === 'bakery'
+          ? 'Café'
+          : bt === 'cafeteria' || bt === 'catering'
+            ? 'Canteen'
+            : emptyLocationForm.cuisine,
+      service_type:
+        bt === 'bakery'
+          ? 'cafe'
+          : bt === 'cafeteria' || bt === 'catering'
+            ? 'canteen'
+            : emptyLocationForm.service_type,
+      seating_capacity: signup.dailyCovers ? String(signup.dailyCovers) : '',
+    };
+  });
   const [saving, setSaving] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const { toast } = useToast();

@@ -1,670 +1,582 @@
-import { useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform
+} from 'framer-motion';
 import { useLegal } from '../contexts/LegalContext';
-import { Reveal, RevealGroup, RevealItem } from '../components/motion/Reveal';
 import {
   ArrowRightIcon,
-  PlayCircleIcon,
   TrendingUpIcon,
   ClipboardCheckIcon,
   BellRingIcon,
-  MenuIcon,
-  XIcon,
   PlugZapIcon,
   CalendarCheckIcon,
-  LeafIcon } from
-'lucide-react';
+  LeafIcon,
+  PauseIcon,
+  PlayIcon
+} from 'lucide-react';
 import { BrandLogo } from '../components/auth/BrandLogo';
 import {
   landingFeatures,
   heroForecast,
   evidencePoints,
-  landingSteps } from
-'../data/landing';
+  landingSteps
+} from '../data/landing';
 
 interface LandingProps {
   onSignIn: () => void;
   onGetStarted: () => void;
 }
 
+const EASE = [0.23, 1, 0.32, 1] as const;
+const AUTO_MS = 6500;
 const featureIcon = [TrendingUpIcon, ClipboardCheckIcon, BellRingIcon];
 
-const navLinks = [
-{ id: 'features', label: 'Features' },
-{ id: 'how-it-works', label: 'How it Works' },
-{ id: 'community', label: 'Community' },
-{ id: 'pricing', label: 'Pricing' }];
+const tabs = [
+  { id: 'features', label: 'Features' },
+  { id: 'how', label: 'How it works' },
+  { id: 'evidence', label: 'Why it matters' },
+  { id: 'community', label: 'Who uses it' }
+] as const;
+type TabId = (typeof tabs)[number]['id'];
 
-
-/* Shared control classes, so one screen cannot drift from itself. Durations and
-   easings are the DESIGN.md § Motion values; press feedback is 0.96, never less. */
-const EASE = [0.23, 1, 0.32, 1] as const;
-
-const navLink =
-'rounded-md px-1 py-2 text-body-sm font-medium text-slate-600 transition-colors duration-150 ease-out hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+const heroSlides = [
+  { src: '/images/landing/restaurant.jpg', label: 'Restaurant dining room' },
+  { src: '/images/landing/service.jpg', label: 'Freshly prepared meal' },
+  { src: '/images/landing/terrace.jpg', label: 'Restaurant terrace' }
+];
 
 const navGhost =
-'rounded-lg px-3 py-2 text-body-sm font-semibold text-slate-700 transition-colors duration-150 ease-out hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 whitespace-nowrap';
-
+  'rounded-lg px-3 py-2 text-body-sm font-semibold text-slate-200 transition-colors duration-150 ease-out hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 whitespace-nowrap';
 const navPrimary =
-'btn-rail inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 whitespace-nowrap';
-
+  'btn-rail inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-body-sm font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 whitespace-nowrap';
 const btnPrimary =
-'btn-rail inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-5 py-3 text-body-sm font-semibold text-white shadow-lift transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
-
-const btnGhost =
-'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-body-sm font-semibold text-slate-700 transition-[background-color,border-color,transform] duration-150 ease-out hover:border-slate-400 hover:bg-slate-50 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
-
-const learnMore =
-'inline-flex w-fit items-center gap-1.5 text-body-sm font-semibold text-brand-700 transition-colors duration-150 ease-out hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
-
+  'btn-rail inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 px-5 py-3 text-body-sm font-semibold text-white shadow-lift transition-[background-color,transform] duration-150 ease-out hover:bg-brand-800 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2';
 const footerLink =
-'rounded-md py-1 text-caption text-slate-500 transition-colors duration-150 ease-out hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+  'rounded-md py-1 text-caption text-slate-500 transition-colors duration-150 ease-out hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+const container = 'mx-auto w-full px-5 sm:px-8 lg:px-12 2xl:px-16';
 
-const container = 'mx-auto w-full max-w-[1360px] px-4 sm:px-6 lg:px-8';
-
+/* Counts the expected-customers figure up once, on load. */
+function useCountUp(target: number, skip: boolean) {
+  const [value, setValue] = useState(skip ? target : 0);
+  useEffect(() => {
+    if (skip) {
+      setValue(target);
+      return;
+    }
+    const controls = animate(0, target, {
+      duration: 1.1,
+      delay: 0.35,
+      ease: EASE,
+      onUpdate: (v) => setValue(Math.round(v))
+    });
+    return () => controls.stop();
+  }, [target, skip]);
+  return value;
+}
 
 export function Landing({ onSignIn, onGetStarted }: LandingProps) {
   const { openLegal } = useLegal();
-  const [menuOpen, setMenuOpen] = useState(false);
   const reduceMotion = useReducedMotion();
+  const [tab, setTab] = useState<TabId>('features');
+  const [autoplay, setAutoplay] = useState(true);
+  const [hovering, setHovering] = useState(false);
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+  const [heroAutoplay, setHeroAutoplay] = useState(true);
+  const running = autoplay && !hovering && !reduceMotion;
 
-  const scrollTo = (id: string) => {
-    setMenuOpen(false);
-    const target = document.getElementById(id);
-    if (!target) return;
-    target.scrollIntoView({
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ?
-      'auto' :
-      'smooth',
-      block: 'start'
-    });
+  useEffect(() => {
+    if (!heroAutoplay || reduceMotion) return;
+    const timer = window.setInterval(() => {
+      setHeroSlideIndex((current) => (current + 1) % heroSlides.length);
+    }, 7000);
+    return () => window.clearInterval(timer);
+  }, [heroAutoplay, reduceMotion]);
+
+  const advance = () =>
+    setTab((current) => tabs[(tabs.findIndex((t) => t.id === current) + 1) % tabs.length].id);
+
+  const choose = (id: TabId) => {
+    setAutoplay(false);
+    setTab(id);
   };
 
-  const [leadFeature, ...supportFeatures] = landingFeatures;
+  const point = useCountUp(Number(heroForecast.point), !!reduceMotion);
+
+  /* Pointer tilt on the forecast card: the one interactive moment in the hero. */
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const rotY = useSpring(useTransform(mx, [-0.5, 0.5], [-5, 5]), { stiffness: 120, damping: 18 });
+  const rotX = useSpring(useTransform(my, [-0.5, 0.5], [4, -4]), { stiffness: 120, damping: 18 });
+  const glowX = useTransform(mx, [-0.5, 0.5], ['25%', '75%']);
+  const glowY = useTransform(my, [-0.5, 0.5], ['25%', '75%']);
+  const glow = useTransform(
+    [glowX, glowY],
+    ([x, y]) => `radial-gradient(420px circle at ${x} ${y}, rgba(255,255,255,0.55), transparent 60%)`
+  );
+
+  const onTilt = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (reduceMotion) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    mx.set((e.clientX - r.left) / r.width - 0.5);
+    my.set((e.clientY - r.top) / r.height - 0.5);
+  };
+  const offTilt = () => {
+    mx.set(0);
+    my.set(0);
+  };
+
+  const rise = (delay = 0, y = 16) => ({
+    initial: reduceMotion ? false : { opacity: 0, y },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.45, ease: EASE, delay }
+  });
 
   return (
-    /* This box is the landing page's own scroll container, and deliberately so.
-       `#root` carries `overflow: hidden` so the authenticated app shell cannot
-       scroll as a whole, which makes `#root` a scrollport — and `position:
-       sticky` binds to the nearest scrollport, not the viewport. With the page
-       scrolling on the document, the header was stuck to a scrollport that never
-       moved, so it scrolled away with the content. Scrolling inside this element
-       gives the sticky header something real to stick to, and keeps the fix off
-       the app shell entirely. */
-    <div className="h-[100dvh] w-full overflow-y-auto overscroll-contain bg-white text-slate-900">
-      {/* Nav */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur">
-        <div className={`${container} flex h-16 items-center justify-between gap-4`}>
-          <BrandLogo size="sm" />
+    <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
+      {/* Ambient layer: two slow drifting washes behind everything. */}
+      <div aria-hidden="true" className="wash-brand pointer-events-none absolute inset-0" />
+      <div aria-hidden="true" className="grain-overlay pointer-events-none absolute inset-0" />
+      {!reduceMotion && (
+        <>
+          <motion.div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-24 -top-24 h-[420px] w-[420px] rounded-full bg-brand-200/50 blur-3xl"
+            animate={{ x: [0, -40, 0], y: [0, 30, 0] }}
+            transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-32 left-1/4 h-[360px] w-[360px] rounded-full bg-amber-200/30 blur-3xl"
+            animate={{ x: [0, 50, 0], y: [0, -24, 0] }}
+            transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        </>
+      )}
 
-          <nav aria-label="Primary" className="hidden items-center gap-8 md:flex">
-            {navLinks.map((link) =>
-            <button key={link.id} type="button" onClick={() => scrollTo(link.id)} className={navLink}>
-                {link.label}
-              </button>
-            )}
-          </nav>
-
+      {/* Header */}
+      <header className="relative z-10 shrink-0 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur">
+        <div className={`${container} flex h-14 items-center justify-between gap-4`}>
+          <BrandLogo size="sm" inverse />
           <div className="flex items-center gap-2">
-            {/* Below `sm` the logo, Sign In, Sign Up and the menu button do not
-                fit on one 320px row — the controls overhung the viewport by
-                ~57px. Sign In moves into the menu panel instead of wrapping or
-                shrinking, so both actions stay reachable and the row stays
-                inside the screen. */}
-            <button type="button" onClick={onSignIn} className={`${navGhost} hidden sm:inline-flex`}>
+            <button type="button" onClick={onSignIn} className={navGhost}>
               Sign In
             </button>
             <button type="button" onClick={onGetStarted} className={navPrimary}>
-              <span className="hidden sm:inline">Get Started Free</span>
+              <span className="hidden sm:inline">Create Account</span>
               <span className="sm:hidden">Sign Up</span>
               <ArrowRightIcon className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              aria-label="Menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
-              className="rounded-lg p-2.5 text-slate-600 transition-colors duration-150 ease-out hover:bg-slate-100 md:hidden">
-              
-              {menuOpen ?
-              <XIcon className="h-5 w-5" strokeWidth={2} aria-hidden="true" /> :
-              <MenuIcon className="h-5 w-5" strokeWidth={2} aria-hidden="true" />}
-              
-            </button>
           </div>
         </div>
-
-        {menuOpen &&
-        <div className="border-t border-slate-200 bg-white px-4 py-3 md:hidden">
-            <ul className="flex flex-col gap-1">
-              {navLinks.map((link) =>
-            <li key={link.id}>
-                  <button
-                type="button"
-                onClick={() => scrollTo(link.id)}
-                className="block w-full rounded-lg px-2 py-2.5 text-left text-body-sm font-medium text-slate-700 transition-colors duration-150 ease-out hover:bg-slate-50">
-                
-                    {link.label}
-                  </button>
-                </li>
-            )}
-            </ul>
-            <button
-            type="button"
-            onClick={onGetStarted}
-            className={`${navPrimary} mt-2 w-full justify-center py-2.5`}>
-            
-              Get Started Free
-            </button>
-            <button
-            type="button"
-            onClick={() => {
-              setMenuOpen(false);
-              onSignIn();
-            }}
-            className={`${navGhost} mt-1 w-full justify-center py-2.5 sm:hidden`}>
-            
-              Sign In
-            </button>
-          </div>
-        }
       </header>
 
-      <main>
-        {/* Hero */}
-        <section className="relative overflow-hidden">
-          <div aria-hidden="true" className="wash-brand pointer-events-none absolute inset-0" />
-          <div aria-hidden="true" className="grain-overlay pointer-events-none absolute inset-0" />
-          
+      {/* Hero: fills whatever height is left between header and dock. */}
+      <main className="relative z-10 flex min-h-0 flex-1 items-center overflow-hidden">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <AnimatePresence initial={false}>
+            <motion.img
+              key={heroSlides[heroSlideIndex].src}
+              src={heroSlides[heroSlideIndex].src}
+              alt=""
+              aria-hidden="true"
+              initial={reduceMotion ? false : { opacity: 0, scale: 1.035 }}
+              animate={{ opacity: 0.52, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 1.2, ease: EASE }}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          </AnimatePresence>
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(90deg, rgba(2, 6, 23, .94) 0%, rgba(2, 6, 23, .78) 48%, rgba(2, 6, 23, .60) 100%), linear-gradient(0deg, rgba(2, 6, 23, .48), transparent 38%, rgba(2, 6, 23, .26))'
+            }}
+          />
+        </div>
 
-          <div className={`${container} relative grid grid-cols-1 items-center gap-12 py-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-20 lg:py-24`}>
+        <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-full border border-white/15 bg-slate-950/70 p-1.5 backdrop-blur sm:right-6">
+          {heroSlides.map((slide, index) => (
+            <button
+              key={slide.src}
+              type="button"
+              aria-label={`Show background: ${slide.label}`}
+              aria-pressed={index === heroSlideIndex}
+              onClick={() => {
+                setHeroSlideIndex(index);
+                setHeroAutoplay(false);
+              }}
+              className="grid h-7 w-7 place-items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
+              <span
+                aria-hidden="true"
+                className={[
+                  'h-1.5 rounded-full transition-[width,background-color] duration-200',
+                  index === heroSlideIndex ? 'w-4 bg-brand-300' : 'w-1.5 bg-white/55'
+                ].join(' ')}
+              />
+            </button>
+          ))}
+          <span className="mx-0.5 h-4 w-px bg-white/20" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label={heroAutoplay ? 'Pause background slideshow' : 'Play background slideshow'}
+            title={heroAutoplay ? 'Pause slideshow' : 'Play slideshow'}
+            onClick={() => setHeroAutoplay((playing) => !playing)}
+            className="grid h-7 w-7 place-items-center rounded-full text-slate-100 transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
+            {heroAutoplay ? (
+              <PauseIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <PlayIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+
+        <div
+          className={`${container} relative z-10 grid grid-cols-1 items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-16`}>
+          <div>
+            <motion.p {...rise(0, 8)} className="text-overline font-semibold uppercase text-brand-300">
+              Demand forecasting for food service
+            </motion.p>
+
+            {/* Type scales with viewport height so the headline never forces a scroll. */}
+            <h1
+              className="mt-3 font-semibold leading-[1.04] tracking-tight text-slate-50"
+              style={{ fontSize: 'clamp(2rem, min(5.6vh, 4.6vw), 3.5rem)' }}>
+              <motion.span className="block text-slate-50" {...rise(0.05, 18)}>
+                Predict Demand.
+              </motion.span>
+              <motion.span className="block text-slate-50" {...rise(0.13, 18)}>
+                Prevent Waste.
+              </motion.span>
+              <motion.span className="block text-brand-300" {...rise(0.21, 18)}>
+                Grow Smarter.
+              </motion.span>
+            </h1>
+
+            <motion.p
+              {...rise(0.3)}
+              className="mt-5 hidden max-w-[52ch] text-lead text-slate-300 sm:block [@media(max-height:720px)]:hidden">
+              DemandIQ turns the records you already keep into a daily forecast, a likely range,
+              and a prep quantity you can defend.
+            </motion.p>
+
+            <motion.div {...rise(0.38)} className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <button type="button" onClick={onGetStarted} className={btnPrimary}>
+                Create Account
+                <ArrowRightIcon className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+              </button>
+            </motion.div>
+          </div>
+
+          {/* Forecast card: what the product gives you each morning. */}
+          <motion.div
+            {...rise(0.15, 22)}
+            className="relative hidden lg:block"
+            style={{ perspective: 1000 }}
+            onPointerMove={onTilt}
+            onPointerLeave={offTilt}>
             <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: EASE }}>
-              
-              <p className="text-overline font-semibold uppercase text-brand-700">
-                Demand forecasting for food service
-              </p>
+              style={reduceMotion ? undefined : { rotateX: rotX, rotateY: rotY }}
+              className="relative overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-900/80 p-5 shadow-lift-lg ring-1 ring-slate-950/60 xl:p-6">
+              {!reduceMotion && (
+                <motion.div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 opacity-70"
+                  style={{ background: glow }}
+                />
+              )}
 
-              <h1 className="mt-4 text-h1 text-slate-900">
-                <motion.span
-                  className="block"
-                  initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.45, ease: EASE }}>
-                  
-                  Predict Demand.
-                </motion.span>
-                <motion.span
-                  className="mt-1 block"
-                  initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.45, ease: EASE, delay: 0.08 }}>
-                  
-                  Prevent Waste.
-                </motion.span>
-                <motion.span
-                  className="mt-1 block"
-                  initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.45, ease: EASE, delay: 0.16 }}>
-                  
-                  Grow <span className="text-brand-600">Smarter.</span>
-                </motion.span>
-              </h1>
-
-              <p className="mt-6 measure text-lead text-slate-600">
-                Restaurants and food vendors decide how much to prepare before they know
-                how many people will walk in. DemandIQ turns the records you already keep
-                into a daily forecast, a likely range, and a prep quantity you can
-                defend.
-              </p>
-
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <button type="button" onClick={onGetStarted} className={btnPrimary}>
-                  Start Free Trial
-                  <ArrowRightIcon className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-                </button>
-                <button type="button" onClick={() => scrollTo('how-it-works')} className={btnGhost}>
-                  <PlayCircleIcon className="h-4 w-4 text-brand-600" strokeWidth={2} aria-hidden="true" />
-                  See how it works
-                </button>
+              <div className="relative flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-body-sm font-semibold text-slate-100">
+                    {heroForecast.location}
+                  </p>
+                  <p className="text-meta text-slate-400">{heroForecast.date}</p>
+                </div>
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-1 text-caption font-semibold text-brand-200">
+                  <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+                    {!reduceMotion && (
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-500 opacity-60" />
+                    )}
+                    <span className="relative h-1.5 w-1.5 rounded-full bg-brand-500" />
+                  </span>
+                  {heroForecast.coverage}% interval
+                </span>
               </div>
 
-              <dl className="mt-10 grid max-w-[540px] grid-cols-3 gap-6 border-t border-slate-200 pt-6">
-                {[
-                ['2 weeks', 'history to get started'],
-                ['A range', 'not a single number'],
-                ['4 ways', 'to bring your data in']].
-                map(([value, label]) =>
-                <div key={label}>
-                    <dt className="text-stat font-semibold tabular-nums text-slate-900">
-                      {value}
-                    </dt>
-                    <dd className="mt-1.5 text-caption leading-snug text-slate-500">
-                      {label}
-                    </dd>
-                  </div>
-                )}
-              </dl>
-            </motion.div>
-
-            {/* Right column: what the product actually gives you each morning. */}
-            <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 22 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.42, ease: EASE, delay: 0.08 }}
-              className="relative">
-              
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lift-lg ring-1 ring-slate-900/5 sm:p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-body-sm font-semibold text-slate-900">
-                      {heroForecast.location}
-                    </p>
-                    <p className="text-meta text-slate-500">{heroForecast.date}</p>
-                  </div>
-                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-caption font-semibold text-brand-800">
-                    <span className="h-1.5 w-1.5 rounded-full bg-brand-500" aria-hidden="true" />
-                    {heroForecast.coverage}% interval
-                  </span>
+              <div className="relative mt-4 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-overline font-semibold uppercase text-slate-400">
+                    Expected customers
+                  </p>
+                  <p className="mt-1 text-stat-md font-semibold tabular-nums text-slate-50">
+                    {point}
+                  </p>
+                  <p className="mt-1 text-meta text-slate-400">
+                    likely {heroForecast.lower}–{heroForecast.upper}
+                  </p>
                 </div>
-
-                <div className="mt-5 flex items-end justify-between gap-4">
-                  <div>
-                    <p className="text-overline font-semibold uppercase text-slate-500">
-                      Expected customers
-                    </p>
-                    <p className="mt-1 text-stat-lg font-semibold tabular-nums text-slate-900">
-                      {heroForecast.point}
-                    </p>
-                    <p className="mt-1 text-meta text-slate-500">
-                      likely {heroForecast.lower}–{heroForecast.upper}
-                    </p>
-                  </div>
-                  <div className="flex h-[58px] items-end gap-1.5" aria-hidden="true">
-                    {heroForecast.trend.map((height, index) =>
+                <div className="flex h-[54px] items-end gap-1.5" aria-hidden="true">
+                  {heroForecast.trend.map((height, index) => (
                     <motion.span
                       key={index}
                       className={[
-                      'w-2.5 rounded-t-sm',
-                      index === heroForecast.trend.length - 1 ? 'bg-brand-600' : 'bg-brand-200'].
-                      join(' ')}
+                        'w-2.5 rounded-t-sm',
+                        index === heroForecast.trend.length - 1 ? 'bg-brand-600' : 'bg-brand-200'
+                      ].join(' ')}
                       initial={reduceMotion ? false : { height: 0 }}
                       animate={{ height: `${height}%` }}
-                      transition={{ duration: 0.4, ease: EASE, delay: 0.2 + index * 0.04 }} />
-                    )}
-                  </div>
+                      transition={{ duration: 0.4, ease: EASE, delay: 0.3 + index * 0.04 }}
+                    />
+                  ))}
                 </div>
-
-                {/* Interval bar with the prep point marked on it. */}
-                <div className="mt-5">
-                  <div className="relative h-2 w-full rounded-full bg-slate-100">
-                    <motion.div
-                      className="absolute inset-y-0 left-[14%] right-[12%] rounded-full bg-brand-200"
-                      initial={reduceMotion ? false : { scaleX: 0 }}
-                      animate={{ scaleX: 1 }}
-                      transition={{ duration: 0.45, ease: EASE, delay: 0.3 }} />
-                    
-                    <span
-                      className="absolute left-[52%] top-1/2 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-brand-700" />
-                    
-                    <span
-                      className="absolute left-[72%] top-1/2 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-amber-500" />
-                    
-                  </div>
-                  {/* Wraps rather than squeezing: at 320px the two legend entries
-                      are wider than the card. */}
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-slate-500">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-brand-700" aria-hidden="true" />
-                      Forecast
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
-                      Prepare {heroForecast.prep} (safer on busy days)
-                    </span>
-                  </div>
-                </div>
-
-                <ul className="mt-5 flex flex-col gap-1.5 border-t border-slate-100 pt-4">
-                  {heroForecast.drivers.map((driver) =>
-                  <li
-                    key={driver.label}
-                    className="flex items-center justify-between gap-3 text-meta">
-                    
-                      <span className="min-w-0 truncate text-slate-600">
-                        {driver.label}
-                      </span>
-                      <span
-                      className={[
-                      'shrink-0 rounded px-1.5 py-0.5 font-semibold tabular-nums',
-                      driver.impact.startsWith('−') ?
-                      'bg-slate-100 text-slate-600' :
-                      'bg-brand-50 text-brand-800'].
-                      join(' ')}>
-                      
-                        {driver.impact}
-                      </span>
-                    </li>
-                  )}
-                </ul>
               </div>
 
-              {/* Sources feeding the card above. */}
-              <motion.ul
-                initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: EASE, delay: 0.35 }}
-                className="mt-3 flex flex-wrap items-center gap-2">
-                
-                {['MoMo', 'POS export', 'Spreadsheet', 'Handwritten photo'].map((src) =>
+              <div className="relative mt-4">
+                <div className="relative h-2 w-full rounded-full bg-slate-800">
+                  <motion.div
+                    className="absolute inset-y-0 left-[14%] right-[12%] origin-left rounded-full bg-brand-400/40"
+                    initial={reduceMotion ? false : { scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.5, ease: EASE, delay: 0.5 }}
+                  />
+                  <motion.span
+                    className="absolute left-[52%] top-1/2 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-brand-700"
+                    initial={reduceMotion ? false : { opacity: 0, scaleY: 0 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    transition={{ duration: 0.3, ease: EASE, delay: 0.85 }}
+                  />
+                  <motion.span
+                    className="absolute left-[72%] top-1/2 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-amber-500"
+                    initial={reduceMotion ? false : { opacity: 0, scaleY: 0 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    transition={{ duration: 0.3, ease: EASE, delay: 1 }}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-slate-300">
+                    <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-brand-700" aria-hidden="true" />
+                    Forecast
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
+                    Prepare {heroForecast.prep} (safer on busy days)
+                  </span>
+                </div>
+              </div>
+
+              <ul className="relative mt-4 flex flex-col gap-1.5 border-t border-slate-700 pt-3 [@media(max-height:760px)]:hidden">
+                {heroForecast.drivers.map((driver, i) => (
+                  <motion.li
+                    key={driver.label}
+                    initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3, ease: EASE, delay: 0.9 + i * 0.07 }}
+                    className="flex items-center justify-between gap-3 text-meta">
+                    <span className="min-w-0 truncate text-slate-300">{driver.label}</span>
+                    <span
+                      className={[
+                        'shrink-0 rounded px-1.5 py-0.5 font-semibold tabular-nums',
+                        driver.impact.startsWith('−')
+                          ? 'bg-slate-800 text-slate-200'
+                          : 'bg-brand-500/10 text-brand-200'
+                      ].join(' ')}>
+                      {driver.impact}
+                    </span>
+                  </motion.li>
+                ))}
+              </ul>
+            </motion.div>
+
+            {/* Data sources feeding the card. */}
+            <motion.ul
+              {...rise(0.6, 10)}
+              className="mt-3 flex flex-wrap items-center gap-2">
+              {['MoMo', 'POS export', 'Spreadsheet', 'Handwritten photo'].map((src) => (
                 <li
                   key={src}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-caption font-medium text-slate-600">
-                  
-                    <PlugZapIcon className="h-3.5 w-3.5 text-brand-600" strokeWidth={1.9} aria-hidden="true" />
-                    {src}
-                  </li>
-                )}
-              </motion.ul>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* Features — one decisive asymmetry instead of three equal cards. */}
-        <section id="features" className="scroll-mt-20 bg-slate-50 py-16 lg:py-24">
-          <div className={container}>
-            <p className="text-overline font-semibold uppercase text-brand-700">
-              Features
-            </p>
-            <h2 className="mt-3 max-w-[760px] title-balance text-h2-lg text-slate-900">
-              Forecasts you can question, decisions you can act on.
-            </h2>
-
-            <RevealGroup className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-12">
-              {leadFeature &&
-              <RevealItem className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-lift transition-colors duration-150 ease-out hover:border-brand-300 lg:col-span-7 sm:p-8">
-                  <span className="text-overline font-semibold uppercase text-brand-700">
-                    01
-                  </span>
-                  <span className="mt-6 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50">
-                    <TrendingUpIcon className="h-6 w-6 text-brand-600" strokeWidth={1.75} aria-hidden="true" />
-                  </span>
-                  <h3 className="mt-5 text-h3 text-slate-900">{leadFeature.title}</h3>
-                  <p className="mt-3 measure text-body-sm leading-relaxed text-slate-600">
-                    {leadFeature.description}
-                  </p>
-                  <button
-                  type="button"
-                  onClick={() => scrollTo('how-it-works')}
-                  className={`${learnMore} mt-auto pt-6`}>
-                  
-                    Learn more
-                    <ArrowRightIcon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-                  </button>
-                </RevealItem>
-              }
-
-              <div className="flex flex-col gap-4 lg:col-span-5">
-                {supportFeatures.map((feature, index) => {
-                  const Icon = featureIcon[index + 1];
-                  return (
-                    <RevealItem
-                      key={feature.id}
-                      className="flex flex-1 items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 transition-colors duration-150 ease-out hover:border-brand-300 sm:p-6">
-                      
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-                        <Icon className="h-5 w-5 text-brand-600" strokeWidth={1.9} aria-hidden="true" />
-                      </span>
-                      <div className="flex min-w-0 flex-col">
-                        <span className="text-overline font-semibold uppercase text-slate-500">
-                          0{index + 2}
-                        </span>
-                        <h3 className="mt-1 text-h3 text-slate-900">{feature.title}</h3>
-                        <p className="mt-2 text-body-sm leading-relaxed text-slate-600">
-                          {feature.description}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => scrollTo('how-it-works')}
-                          className={`${learnMore} mt-4`}>
-                          
-                          Learn more
-                          <ArrowRightIcon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-                        </button>
-                      </div>
-                    </RevealItem>);
-
-                })}
-              </div>
-            </RevealGroup>
-          </div>
-        </section>
-
-        {/* Community — merged with "who uses it" so no section is a flat strip. */}
-        <section id="community" className="scroll-mt-20 py-16 lg:py-24">
-          <div className={container}>
-            <Reveal>
-              <p className="text-overline font-semibold uppercase text-brand-700">
-                Who uses DemandIQ
-              </p>
-              <h2 className="mt-3 max-w-[760px] title-balance text-h2 text-slate-900">
-                Kitchens, canteens and fresh-food vendors across Kigali
-              </h2>
-              <p className="mt-4 measure text-body-sm leading-relaxed text-slate-600">
-                DemandIQ is designed for restaurants, cafeterias, and fresh-food vendors who want to
-                reduce waste through data-driven preparation decisions.
-              </p>
-            </Reveal>
-
-            <RevealGroup className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {/* Two things the product actually does, rather than a performance
-                  number. The old tile here read "90% of days land in our range",
-                  which is the model's *target* interval coverage — nothing in the
-                  run manifests measures realised coverage, so the page was
-                  claiming a result it could not evidence. */}
-              <RevealItem className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-lift">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50">
-                  <CalendarCheckIcon className="h-6 w-6 text-brand-600" strokeWidth={1.9} aria-hidden="true" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-h3 font-semibold text-slate-900">
-                    Per location
-                  </span>
-                  <span className="block text-caption text-slate-500">
-                    each site forecast on its own, not one blended total
-                  </span>
-                </span>
-              </RevealItem>
-              <RevealItem className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-lift">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50">
-                  <LeafIcon className="h-6 w-6 text-brand-600" strokeWidth={1.9} aria-hidden="true" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-h3 font-semibold text-slate-900">
-                    Always learning
-                  </span>
-                  <span className="block text-caption text-slate-500">
-                    updates as new data arrives
-                  </span>
-                </span>
-              </RevealItem>
-            </RevealGroup>
-          </div>
-        </section>
-
-        {/* Evidence */}
-        <section className="relative overflow-hidden border-y border-slate-200 bg-brand-900 py-16 lg:py-20">
-          <div aria-hidden="true" className="grain-overlay pointer-events-none absolute inset-0" />
-          <div className={`${container} relative`}>
-            <Reveal>
-              <h2 className="text-overline font-semibold uppercase text-brand-200">
-                Why this matters
-              </h2>
-            </Reveal>
-            <RevealGroup as="ul" className="mt-8 grid grid-cols-2 gap-x-8 gap-y-10 lg:grid-cols-4">
-              {evidencePoints.map((point) =>
-              <RevealItem as="li" key={point.id} className="flex flex-col">
-                  <span className="text-stat font-semibold tabular-nums text-white sm:text-stat-lg">
-                    {point.value}
-                  </span>
-                  <span className="mt-2 text-body-sm leading-relaxed text-brand-100">
-                    {point.label}
-                  </span>
-                  <span className="mt-auto pt-3 text-caption text-brand-300">
-                    {point.source}
-                  </span>
-                </RevealItem>
-              )}
-            </RevealGroup>
-          </div>
-        </section>
-
-        {/* How it works — a numbered rail rather than three icon blobs. */}
-        <section id="how-it-works" className="scroll-mt-20 bg-slate-50 py-16 lg:py-24">
-          <div className={container}>
-            <Reveal>
-              <p className="text-overline font-semibold uppercase text-brand-700">
-                How it works
-              </p>
-              <h2 className="mt-3 max-w-[720px] title-balance text-h2-lg text-slate-900">
-                From your records to tomorrow's prep number
-              </h2>
-            </Reveal>
-
-            <RevealGroup className="mt-12">
-              <ol className="grid grid-cols-1 gap-x-10 gap-y-10 md:grid-cols-3">
-                {landingSteps.map((step, index) =>
-                <RevealItem as="li" key={step.id} className="relative">
-                    <div className="flex items-center gap-3">
-                      <span className="text-h2 font-semibold tabular-nums text-brand-700">
-                        0{index + 1}
-                      </span>
-                      <span aria-hidden="true" className="h-px flex-1 bg-slate-200" />
-                    </div>
-                    <h3 className="mt-4 text-h3 text-slate-900">{step.title}</h3>
-                    <p className="mt-2 text-body-sm leading-relaxed text-slate-600">
-                      {step.description}
-                    </p>
-                  </RevealItem>
-                )}
-              </ol>
-            </RevealGroup>
-          </div>
-        </section>
-
-        {/* CTA */}
-        <section id="pricing" className="scroll-mt-20 py-16 lg:py-24">
-          <div className={container}>
-            <Reveal className="relative overflow-hidden rounded-3xl bg-brand-800 px-6 py-14 text-center shadow-lift-lg lg:px-16 lg:py-20">
-              <div aria-hidden="true" className="grain-overlay pointer-events-none absolute inset-0" />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_60%)]" />
-
-              <h2 className="relative mx-auto max-w-[720px] title-balance text-h2-lg text-white">
-                Ready to stop guessing and start forecasting?
-              </h2>
-              <button
-                type="button"
-                onClick={onGetStarted}
-                className="relative mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-body-sm font-semibold text-brand-800 transition-[background-color,transform] duration-150 ease-out hover:bg-brand-50 active:scale-[0.96] focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-brand-800">
-
-                Create Free Account
-                <ArrowRightIcon className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-              </button>
-              <p className="relative mt-4 text-caption text-brand-100">
-                No credit card required · Free 14-day trial · Cancel anytime.
-              </p>
-            </Reveal>
-          </div>
-        </section>
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-caption font-medium text-slate-200">
+                  <PlugZapIcon className="h-3.5 w-3.5 text-brand-600" strokeWidth={1.9} aria-hidden="true" />
+                  {src}
+                </li>
+              ))}
+            </motion.ul>
+          </motion.div>
+        </div>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white">
-        <Reveal className={`${container} grid grid-cols-2 gap-8 py-12 md:grid-cols-4`}>
-          <div className="col-span-2 md:col-span-1">
-            <BrandLogo size="sm" />
-            <p className="mt-3 max-w-[240px] text-caption leading-relaxed text-slate-500">
-              The explainable AI platform for demand forecasting and food waste
-              prevention.
-            </p>
-          </div>
-
-          {[
-          {
-            title: 'Product',
-            links: [
-            { label: 'Features', action: () => scrollTo('features') },
-            { label: 'How it Works', action: () => scrollTo('how-it-works') },
-            { label: 'Pricing', action: () => scrollTo('pricing') },
-            { label: 'Create account', action: onGetStarted }]
-
-          },
-          {
-            title: 'Company',
-            links: [
-            { label: 'Community', action: () => scrollTo('community') },
-            { label: 'Sign in', action: onSignIn },
-            { label: 'Careers', action: () => scrollTo('community') },
-            { label: 'Contact', action: () => scrollTo('pricing') }]
-
-          },
-          {
-            title: 'Resources',
-            links: [
-            { label: 'Help Center', action: () => scrollTo('features') },
-            { label: 'Guides', action: () => scrollTo('how-it-works') },
-            { label: 'Templates', action: () => scrollTo('features') },
-            { label: 'Compliance', action: () => scrollTo('pricing') }]
-
-          }].
-          map((column) =>
-          <div key={column.title}>
-              <p className="text-caption font-semibold text-slate-900">{column.title}</p>
-              <ul className="mt-3 flex flex-col gap-1">
-                {column.links.map((link) =>
-              <li key={link.label}>
-                    <button
+      {/* Dock: replaces the scrolling sections. Tabs swap the panel in place. */}
+      <section
+        aria-label="More about DemandIQ"
+        className="relative z-10 shrink-0 border-t border-slate-200 bg-slate-50"
+        onPointerEnter={() => setHovering(true)}
+        onPointerLeave={() => setHovering(false)}>
+        <div className={container}>
+          <div role="tablist" aria-label="Sections" className="flex gap-1 overflow-x-auto sm:gap-6">
+            {tabs.map((t) => {
+              const active = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  role="tab"
                   type="button"
-                  onClick={link.action}
-                  className={footerLink}>
-                  
-                      {link.label}
-                    </button>
-                  </li>
-              )}
-              </ul>
-            </div>
-          )}
-        </Reveal>
+                  id={`tab-${t.id}`}
+                  aria-selected={active}
+                  aria-controls="dock-panel"
+                  onClick={() => choose(t.id)}
+                  className={[
+                    'relative whitespace-nowrap rounded-md px-2 py-3 text-body-sm font-semibold transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:px-1',
+                    active ? 'text-brand-700' : 'text-slate-500 hover:text-slate-800'
+                  ].join(' ')}>
+                  {t.label}
+                  {active && (
+                    <>
+                      <span aria-hidden="true" className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-slate-200 sm:inset-x-0" />
+                      {autoplay && !reduceMotion ? (
+                        <motion.span
+                          key={`${t.id}-${running}`}
+                          aria-hidden="true"
+                          className="absolute inset-x-1 bottom-0 h-0.5 origin-left rounded-full bg-brand-600 sm:inset-x-0"
+                          initial={{ scaleX: 0 }}
+                          animate={{ scaleX: running ? 1 : 0 }}
+                          transition={running ? { duration: AUTO_MS / 1000, ease: 'linear' } : { duration: 0.15 }}
+                          onAnimationComplete={() => running && advance()}
+                        />
+                      ) : (
+                        <motion.span
+                          layoutId="dock-underline"
+                          aria-hidden="true"
+                          className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-brand-600 sm:inset-x-0"
+                          transition={{ duration: 0.25, ease: EASE }}
+                        />
+                      )}
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
+        <div className={`${container} pb-4 pt-3`}>
+          <div id="dock-panel" role="tabpanel" aria-labelledby={`tab-${tab}`} className="min-h-[148px] sm:min-h-[104px]">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={tab}
+                initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
+                transition={{ duration: 0.2, ease: EASE }}>
+                {tab === 'features' && (
+                  <ul className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-6">
+                    {landingFeatures.map((feature, i) => {
+                      const Icon = featureIcon[i] ?? TrendingUpIcon;
+                      return (
+                        <li key={feature.id} className="flex items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
+                            <Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.9} aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0">
+                            <h3 className="text-body-sm font-semibold text-slate-900">{feature.title}</h3>
+                            <p className="mt-0.5 line-clamp-2 text-caption leading-snug text-slate-600 sm:line-clamp-3">
+                              {feature.description}
+                            </p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {tab === 'how' && (
+                  <ol className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-6">
+                    {landingSteps.map((step, i) => (
+                      <li key={step.id} className="flex items-start gap-3">
+                        <span className="text-h3 font-semibold tabular-nums leading-none text-brand-700">
+                          0{i + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="text-body-sm font-semibold text-slate-900">{step.title}</h3>
+                          <p className="mt-0.5 line-clamp-2 text-caption leading-snug text-slate-600 sm:line-clamp-3">
+                            {step.description}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                {tab === 'evidence' && (
+                  <ul className="grid grid-cols-2 gap-x-6 gap-y-3 lg:grid-cols-4">
+                    {evidencePoints.map((p) => (
+                      <li key={p.id} className="flex min-w-0 flex-col">
+                        <span className="text-stat font-semibold tabular-nums leading-none text-slate-900">
+                          {p.value}
+                        </span>
+                        <span className="mt-1 line-clamp-2 text-caption leading-snug text-slate-600">
+                          {p.label}
+                        </span>
+                        <span className="mt-0.5 truncate text-caption text-slate-400">{p.source}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {tab === 'community' && (
+                  <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[1.2fr_1fr_1fr] sm:gap-6">
+                    <div>
+                      <h3 className="text-body-sm font-semibold text-slate-900">
+                        Kitchens, canteens and fresh-food vendors across Kigali
+                      </h3>
+                      <p className="mt-0.5 line-clamp-2 text-caption leading-snug text-slate-600">
+                        Built for teams who want to cut waste with data-driven prep decisions.
+                      </p>
+                    </div>
+                    {[
+                      { Icon: CalendarCheckIcon, title: 'Per location', text: 'each site forecast on its own' },
+                      { Icon: LeafIcon, title: 'Always learning', text: 'updates as new data arrives' }
+                    ].map(({ Icon, title, text }) => (
+                      <div key={title} className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
+                          <Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.9} aria-hidden="true" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-body-sm font-semibold text-slate-900">{title}</span>
+                          <span className="block text-caption text-slate-500">{text}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Legal strip */}
         <div className="border-t border-slate-200">
-          <div className={`${container} flex flex-wrap items-center justify-between gap-2 py-5 text-caption text-slate-500`}>
-            <span>© 2025 DemandIQ. All rights reserved.</span>
-            <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <div className={`${container} flex flex-wrap items-center justify-between gap-x-4 gap-y-0 py-1 text-caption text-slate-500`}>
+            <span>© {new Date().getFullYear()} DemandIQ . V1</span>
+            <span className="flex items-center gap-x-4">
               {[
-              { label: 'Privacy Policy', id: 'privacy' as const },
-              { label: 'Terms of Service', id: 'terms' as const },
-              { label: 'Cookie Policy', id: 'cookies' as const }].
-              map((item) =>
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => openLegal(item.id)}
-                className={footerLink}>
-                
+                { label: 'Privacy', id: 'privacy' as const },
+                { label: 'Terms', id: 'terms' as const },
+                { label: 'Cookies', id: 'cookies' as const }
+              ].map((item) => (
+                <button key={item.id} type="button" onClick={() => openLegal(item.id)} className={footerLink}>
                   {item.label}
                 </button>
-              )}
+              ))}
             </span>
           </div>
         </div>
-      </footer>
-    </div>);
-
+      </section>
+    </div>
+  );
 }

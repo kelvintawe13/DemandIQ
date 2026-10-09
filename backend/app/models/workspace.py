@@ -5,11 +5,11 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import DateTime, Text
+from sqlalchemy import DateTime, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, MutableJSONList
 
 
 class Workspace(Base):
@@ -25,7 +25,7 @@ class Workspace(Base):
     # with a guess. ``data_sources`` is a list of source ids from the form.
     location_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_covers: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    data_sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    data_sources: Mapped[list[str] | None] = mapped_column(MutableJSONList, nullable=True)
     country: Mapped[str] = mapped_column(Text, nullable=False, default="RW")
     timezone: Mapped[str] = mapped_column(Text, nullable=False, default="Africa/Kigali")
     created_at: Mapped[datetime.datetime] = mapped_column(

@@ -1,15 +1,20 @@
 
+import { withBase } from '../../lib/route';
+
 interface BrandLogoProps {
   size?: 'sm' | 'md';
   align?: 'left' | 'center';
+  inverse?: boolean;
 }
 
-export function BrandLogo({ size = 'md', align = 'left' }: BrandLogoProps) {
+export function BrandLogo({ size = 'md', align = 'left', inverse = false }: BrandLogoProps) {
   const isSmall = size === 'sm';
   return (
-    <span
+    <a
+      href={withBase('/')}
+      aria-label="DemandIQ home"
       className={[
-      'flex items-center gap-2',
+      'flex items-center gap-2 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
       align === 'center' ? 'justify-center' : 'justify-start'].
       join(' ')}>
       
@@ -39,12 +44,13 @@ export function BrandLogo({ size = 'md', align = 'left' }: BrandLogoProps) {
       </svg>
       <span
         className={[
-        'font-bold tracking-tight text-slate-900',
+        'font-bold tracking-tight',
+        inverse ? 'text-white' : 'text-slate-900',
         isSmall ? 'text-lead' : 'text-h3'].
         join(' ')}>
         
-        Demand<span className="text-brand-700">IQ</span>
+        Demand<span className={inverse ? 'text-brand-300' : 'text-brand-700'}>IQ</span>
       </span>
-    </span>);
+    </a>);
 
 }

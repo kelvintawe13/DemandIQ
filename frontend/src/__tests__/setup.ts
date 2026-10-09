@@ -18,21 +18,22 @@ if (!('IntersectionObserver' in globalThis)) {
 if (!('ResizeObserver' in globalThis)) {
   (globalThis as unknown as Record<string, unknown>).ResizeObserver = MockResizeObserver;
 }
-if (!('matchMedia' in globalThis.window)) {
-  Object.defineProperty(globalThis.window, 'matchMedia', {
-    writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  });
-}
+Object.defineProperty(globalThis.window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    // Tests run with prefers-reduced-motion ON: framer-motion renders
+    // entrances in their final state (Panel starts opacity 1), so assertions
+    // are synchronous and deterministic instead of racing the first frame.
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+});
 // framer-motion reducedMotion
 Object.defineProperty(globalThis.window, 'scrollTo', { value: () => {}, writable: true });
 

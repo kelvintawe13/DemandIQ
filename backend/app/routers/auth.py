@@ -140,6 +140,12 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     workspace = Workspace(
         name=payload.business_name,
         business_type=payload.business_type,
+        # The signup profile is kept: the first-location onboarding reads it
+        # (default area/capacity), and "how many sites do you run?" in /me
+        # reflects what the organisation actually answered, not a guess.
+        location_count=payload.location_count,
+        daily_covers=payload.daily_covers,
+        data_sources=payload.data_sources,
         country="RW",
         timezone="Africa/Kigali",
     )
@@ -602,6 +608,10 @@ def me(current_user: User = Depends(get_current_user), db: Session = Depends(get
             "business_type": workspace.business_type,
             "country": workspace.country,
             "timezone": workspace.timezone,
+            # Signup profile (019) — drives the first-location onboarding.
+            "location_count": workspace.location_count,
+            "daily_covers": workspace.daily_covers,
+            "data_sources": workspace.data_sources,
         }
     perms = _permissions_for(current_user)
     return MeResponse(

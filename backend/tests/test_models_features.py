@@ -704,7 +704,7 @@ def test_models_share_one_declarative_base() -> None:
 
 
 def test_every_jsonb_column_is_mutation_tracked() -> None:
-    """JSONB columns must use ``MutableJSONB``, never a bare ``JSONB``.
+    """JSONB columns must be mutation-tracked, never a bare ``JSONB``.
 
     SQLAlchemy treats a scalar attribute as dirty by object *identity*, so a
     bare JSONB column silently drops in-place edits (``row.data["k"] = v``).
@@ -712,19 +712,27 @@ def test_every_jsonb_column_is_mutation_tracked() -> None:
     ``missing_mapping``: the column map written by ``/mapping`` never reached
     the database. A bare JSONB column anywhere reintroduces the same silent
     data loss, so this guard covers the whole metadata, not just ingestion.
+
+    Two tracked wraps are valid: ``MutableJSONB`` (``MutableDict``) for
+    dict-valued columns and ``MutableJSONList`` (``MutableList``) for
+    list-valued ones — ``MutableDict.as_mutable()`` refuses lists.
     """
     from sqlalchemy.dialects.postgresql import JSONB
 
     import app.models  # noqa: F401  — register every table
-    from app.models.base import Base, MutableJSONB
+    from app.models.base import Base, MutableJSONB, MutableJSONList
 
     offenders = [
         f"{table.name}.{column.name}"
         for table in Base.metadata.sorted_tables
         for column in table.columns
-        if isinstance(column.type, JSONB) and column.type is not MutableJSONB
+        if (
+            isinstance(column.type, JSONB)
+            and column.type is not MutableJSONB
+            and column.type is not MutableJSONList
+        )
     ]
     assert offenders == [], (
         "these JSONB columns are not mutation-tracked — declare them with "
-        "MutableJSONB: " + ", ".join(offenders)
+        "MutableJSONB (dict) or MutableJSONList (list): " + ", ".join(offenders)
     )

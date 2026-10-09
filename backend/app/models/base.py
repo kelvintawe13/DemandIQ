@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy import MetaData
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Naming convention helps Alembic generate deterministic constraint names.
@@ -35,6 +35,10 @@ metadata = MetaData(naming_convention=convention)
 # it, e.g. ``row.data = {**row.data, "k": v}``) always works; mutating a nested
 # list/dict in place still does not, so copy the nested value on the way out.
 MutableJSONB = MutableDict.as_mutable(JSONB)
+# Same tracking for columns whose value is a JSON *list* — ``MutableDict``
+# only accepts mappings, and a bare JSONB on a list column drops in-place
+# edits exactly like the dict case. Owned by the signup profile for now.
+MutableJSONList = MutableList.as_mutable(JSONB)
 
 
 class Base(DeclarativeBase):

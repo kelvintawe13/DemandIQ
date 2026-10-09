@@ -3,6 +3,14 @@ import { api, setToken, setOn401, ApiException } from '../api/client';
 import { onSessionExpired, SESSION_EXPIRED_MESSAGE } from '../lib/sessionExpiry';
 import { useToast } from './ToastContext';
 
+export interface SignupProfile {
+  /** How many locations the organisation said it runs (may be undefined). */
+  locationCount?: number;
+  dailyCovers?: number;
+  dataSources?: string[];
+  businessType?: string | null;
+}
+
 export interface SessionUser {
   name: string;
   role: string;
@@ -28,6 +36,8 @@ export interface SessionUser {
   created_at?: string | null;
   createdAt?: string | null;
   bio?: string | null;
+  /** Signup answers from the workspace — drives first-location onboarding. */
+  signupProfile?: SignupProfile;
   /** Platform-level administrator (manages all workspaces & site settings). */
   isSiteAdmin?: boolean;
   /**
@@ -90,7 +100,7 @@ interface MeResponse {
     profile_completed?: boolean;
     is_site_admin?: boolean;
   };
-  workspace?: { id: string; name: string } | null;
+  workspace?: { id: string; name: string; location_count?: number; daily_covers?: number; data_sources?: string[]; business_type?: string | null } | null;
   permissions: string[];
   /** False for OAuth-only accounts (Google) — no password to confirm. */
   has_password?: boolean;
@@ -106,6 +116,15 @@ export function mapMeToSessionUser(me: MeResponse): SessionUser {
     initials: initialsFor(u.name),
     id: u.id,
     workspaceId: u.workspace_id,
+    // Signup answers (019) — consumed by first-location onboarding.
+    signupProfile: me.workspace
+      ? {
+          locationCount: me.workspace.location_count,
+          dailyCovers: me.workspace.daily_covers,
+          dataSources: me.workspace.data_sources,
+          businessType: me.workspace.business_type,
+        }
+      : undefined,
     permissions: me.permissions,
     mfaEnabled: u.mfa_enabled === true,
     phone: u.phone ?? null,

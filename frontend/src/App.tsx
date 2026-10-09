@@ -109,7 +109,7 @@ const TwoFactor = lazy(() => import('./pages/auth/TwoFactor').then((m) => ({ def
 import { demoAccounts } from './data/demoAccount';
 import type { DemoAccount } from './data/demoAccount';
 import { canAccess, HOME_BY_ROLE, ROLE_KEY_BY_LABEL, type AppRole } from './data/navItems';
-import { setToken } from './api/client';
+import { api, setToken } from './api/client';
 import { SESSION_EXPIRED_MESSAGE, notifySessionExpired, onSessionExpired } from './lib/sessionExpiry';
 import { pageMeta } from './data/pages';
 import { syncDocumentMeta } from './hooks/useDocumentTitle';
@@ -297,6 +297,33 @@ function AppBooted({
       (canAccess(role, deepLink, session.user.isSiteAdmin === true) || PERSONAL_ROUTES.has(deepLink));
     setHistory([canOpenDeepLink ? deepLink : seat.home]);
   }, [route, session.isAuthenticated, session.user, setAccount]);
+
+  // First-run onboarding: the signup flow asks "how many locations do you
+  // run?" but stores nothing yet — a workspace with zero locations cannot
+  // forecast, ingest, or see anything on Overview. Once per session entry,
+  // if there is still no location, route straight to Add Location so the
+  // workspace starts from its first real row (never overriding a deep link
+  // the user explicitly opened).
+  const onboardChecked = useRef<string | null>(null);
+  useEffect(() => {
+    if (route !== 'app' || !session.isAuthenticated || !session.user.id) return;
+    const roleKey = session.user.roleKey ?? '';
+    if (roleKey !== 'owner' && roleKey !== 'administrator') return;
+    if (onboardChecked.current === session.user.id) return;
+    onboardChecked.current = session.user.id;
+    void api
+      .get<{ data?: unknown[] }>('/api/v1/locations')
+      .then((res) => {
+        const items = res.data ?? [];
+        if (items.length > 0) return;
+        setHistory((current) =>
+          current.length <= 1 && current[0] !== 'admin-locations-new'
+            ? ['admin-locations-new']
+            : current,
+        );
+      })
+      .catch(() => undefined); // cosmetic gate — never block entry
+  }, [route, session.isAuthenticated, session.user.id, session.user.roleKey]);
 
   const requested = history[history.length - 1];
   // Account-level screens sit outside the role navigation but are open to
