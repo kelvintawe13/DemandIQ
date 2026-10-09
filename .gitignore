@@ -1,0 +1,57 @@
+# Dependencies
+node_modules
+
+# Frontend build output
+frontend/dist/
+frontend/e2e/
+
+# Frontend environment (local overrides)
+frontend/.env
+
+# Backend virtual environment and caches
+backend/.venv/
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/demandiq_backend.egg-info/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/jobs/__pycache__/
+backend/app/middleware/__pycache__/
+backend/app/models/__pycache__/
+backend/app/routers/__pycache__/
+backend/app/services/__pycache__/
+backend/app/security/__pycache__/
+backend/tests/__pycache__/
+backend/migrations/__pycache__/
+
+# Model virtual environment and caches
+model/.venv/
+model/.pytest_cache/
+model/artifacts/
+model/data/          # Recruit & Urban-Waste dataset CSVs (external data)
+model/src/diq_model/__pycache__/
+model/src/demandiq_model.egg-info/
+model/tests/__pycache__/
+
+# Docker
+docker-compose.override.yml
+
+# Environment variables (local development)
+backend/.env
+frontend/.env
+
+# Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.python.env
+
+# Python/Packaging
+*.egg-info/
+dist/
+build/
+
+# Misc
+package-lock.json
