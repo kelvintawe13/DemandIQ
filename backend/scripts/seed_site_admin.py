@@ -44,7 +44,10 @@ DEMO_PASSWORD = os.environ.get("DEMANDIQ_DEMO_PASSWORD", "DemandIQ2026!")
 
 DEFAULT_SETTINGS = {
     "registration_open": True,
-    "default_role": "viewer",
+    # Owner, not viewer: an organisation bringing its operation onto the
+    # platform must own its workspace from its first user. Must match
+    # ``SETTING_DEFAULTS["default_role"]`` in app/routers/site_admin.py.
+    "default_role": "owner",
     "announcement": "",
     "support_email": "support@demandiq.app",
     "maintenance_mode": False,
