@@ -257,8 +257,8 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
   { id: 'saved', label: 'Saved', icon: BookmarkIcon, count: pinned.length }];
 
 
-  const body =
-  <div className="flex h-full min-h-0 flex-col bg-white">
+  const body = (
+    <div className="flex h-full min-h-0 flex-col bg-white">
       <header className="shrink-0 border-b border-slate-200 px-3.5 py-3">
         <div className="flex items-start gap-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-700">
@@ -489,14 +489,21 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
             initial={reduced ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.22, ease: EASE }}
-            className={message.author === 'user' ? 'flex justify-end' : ''}>
+            className={message.author === 'user' ? "flex justify-end items-end gap-3" : "flex justify-start items-start gap-3"}>
             
                     {message.author === 'user' ?
-            <p className="max-w-[86%] rounded-xl rounded-br-sm bg-brand-700 px-3 py-2 text-caption leading-relaxed text-white">
-                        {message.text}
-                      </p> :
+            <div className="flex max-w-[86%] flex-col items-end">
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 text-xs text-slate-500">
+                <span className="text-xs font-medium">You</span>
+              </span>
+              <p className="rounded-xl rounded-br-sm bg-brand-700 px-3 py-2 text-caption leading-relaxed text-white">
+                {message.text}
+              </p>
+            </div> :
             message.pending ?
             <div className="inline-flex items-center gap-1.5 rounded-xl rounded-tl-sm border border-slate-200 bg-white px-3 py-2.5">
+              <SparklesIcon className="h-3 w-3 text-brand-600" strokeWidth={1.5} />
+              <span className="text-xs font-medium text-brand-600">Assistant</span>
                         {[0, 1, 2].map((dot) =>
               <motion.span
                 key={dot}
@@ -529,6 +536,9 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
             }
                   </motion.li>
           )}
+              {/* Conversation history - last 3 Q&A pairs */}
+
+
               </AnimatePresence>
             </ul>)
       }
@@ -593,7 +603,8 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
         }
         </div>
       </div>
-    </div>;
+    </div>
+  );
 
 
   return (
