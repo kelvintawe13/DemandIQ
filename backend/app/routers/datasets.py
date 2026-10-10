@@ -333,7 +333,27 @@ def _compute_waste_stats(rows: list[WasteObservation]) -> dict[str, Any]:
     date_start = min(dates).isoformat() if dates else _FIXTURE_WASTE_STATS["date_range"]["start"]
     date_end = max(dates).isoformat() if dates else _FIXTURE_WASTE_STATS["date_range"]["end"]
 
+    # Monthly medians (Section 3.21 seasonality: March waste ran ~2× November's).
+    # Computed from the same rows already in hand — no extra query, no demand join.
+    by_month: dict[str, list[float]] = {}
+    month_of: dict[datetime.date, str] = {}
+    for r in rows:
+        if r.observed_on is not None and r.waste_kg is not None:
+            try:
+                v = float(r.waste_kg)
+            except (TypeError, ValueError):
+                continue
+            key = f"{r.observed_on.year:04d}-{r.observed_on.month:02d}"
+            by_month.setdefault(key, []).append(v)
+            month_of[r.observed_on] = key
+    monthly_medians = [
+        {"month": m, "median_kg": round(statistics.median(vals), 2), "n": len(vals)}
+        for m, vals in sorted(by_month.items())
+        if len(vals) >= 10
+    ]
+
     return {
+        "monthly_pattern": monthly_medians,
         "total_records": total_records,
         "non_missing_waste": non_missing,
         "missing_waste": missing,
