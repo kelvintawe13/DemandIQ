@@ -631,6 +631,37 @@ def ask_question(
     if rec and rec.get("turn_count", 0) >= MAX_TURNS_PER_SESSION:
         raise _error(429, "turn_limit", "Session turn limit reached. Open a new session")
 
+    normalized_question = " ".join(q.split()).strip("!.,?")
+    if normalized_question in {
+        "hi",
+        "hello",
+        "hey",
+        "hi there",
+        "hello there",
+        "hey there",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    }:
+        return _record_turn(
+            {
+                "id": str(uuid.uuid4()),
+                "session_id": str(payload.session_id),
+                "question": payload.question,
+                "headline": "What would you like to check?",
+                "body": [
+                    "I can help with demand forecasts, preparation policies, and your workspace's demand data."
+                ],
+                "figures": [],
+                "action": None,
+                "sources": [],
+                "tools_used": [],
+                "refused": False,
+                "latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+                "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            }
+        )
+
     # Increment quota
     today = datetime.datetime.now(datetime.UTC).date().isoformat()
     _USAGE[(current_user.id, today)] = _USAGE.get((current_user.id, today), 0) + 1
