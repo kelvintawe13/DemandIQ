@@ -348,6 +348,25 @@ def test_ask_question_guardrail_refuses_weight_claims_without_erroring() -> None
     assert answer["tools_used"] == []
 
 
+@pytest.mark.parametrize("question", ["hi", "Hello!", "hey there"])
+def test_greeting_gets_a_short_reply_without_forecast_claims(question: str) -> None:
+    ws = _workspace()
+    user = _user(ws.id)
+    sid = _seed_session(user)
+    db = MagicMock()
+
+    answer = _ask(_client(user, db), sid, question)
+
+    assert answer["headline"] == "What would you like to check?"
+    assert answer["body"] == [
+        "I can help with demand forecasts, preparation policies, and your workspace's demand data."
+    ]
+    assert answer["figures"] == []
+    assert answer["sources"] == []
+    assert answer["tools_used"] == []
+    db.scalar.assert_not_called()
+
+
 def test_a_preflight_refusal_costs_no_allowance() -> None:
     """A guardrail decline is not billed: nothing was planned or composed.
 
