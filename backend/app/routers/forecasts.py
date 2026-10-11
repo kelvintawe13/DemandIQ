@@ -23,12 +23,12 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.forecast import Forecast
-from app.models.location import Location
+from app.models.forecast import Forecast, ForecastExplanation, ModelVersion
+from app.models.location import DemandObservation, Location
 from app.models.location_access import LocationAccessLog
 from app.models.user import User
 from app.security.api_key_auth import ApiKeyPrincipal, get_principal, require_write_scope
@@ -36,6 +36,7 @@ from app.services.explain.shap import build_explanation, get_explanation
 from app.services.feature_build import FeatureVector, build_features
 from app.services.forecasting.conformal import DEFAULT_COVERAGE
 from app.services.forecasting.generate import generate_forecast
+from app.services.policy.simulate import simulate_policies
 
 logger = logging.getLogger(__name__)
 
@@ -585,330 +586,357 @@ def batch_forecasts(
     )
     return {"created": created, "target_date": target.isoformat(), "horizon_days": horizon}
 
-# P0: SHAP explanation summary endpoint
-@forecast_router.get("/{forecast_id}/explanation/summary", response_model=dict)
+
+# ---------------------------------------------------------------------------
+# GET /{id}/explanation/summary — plain-language predictive attribution
+# ---------------------------------------------------------------------------
+
+# Plain-language names for the fs-2026.09.2 feature set — the columns the
+# serving booster actually uses. Kept in step with the feature set so a summary
+# can never name a feature the model does not have (an earlier version listed
+# FEATURE_SPEC's product-schema names, e.g. `service_type`/`days_since_payday`,
+# none of which are model inputs).
+_FEATURE_TRANSLATIONS: dict[str, str] = {
+    "lag_1": "yesterday's demand",
+    "lag_7": "the same weekday last week",
+    "lag_14": "the same weekday two weeks ago",
+    "roll_mean_7": "the 7-day average demand",
+    "roll_mean_28": "the 28-day average demand",
+    "roll_std_28": "28-day demand volatility",
+    "roll_max_7": "the busiest day in the last week",
+    "roll_max_28": "the busiest day in the last month",
+    "roll_p90_28": "the 90th-percentile day over the last month",
+    "dow_mean_8w": "the average of this weekday over 8 weeks",
+    "dow_std_8w": "how consistent this weekday is",
+    "trend_7_28": "the recent trend (7-day vs 28-day average)",
+    "dow": "the day of the week",
+    "is_weekend": "the weekend pattern",
+    "month": "the month of the year",
+    "week_of_year": "the week of the year",
+    "is_holiday": "a public holiday",
+    "day_before_holiday": "the day before a holiday",
+    "day_after_holiday": "the day after a holiday",
+    "is_weekend_or_holiday": "a weekend or holiday",
+    "is_weekend_holiday": "a weekend that is also a holiday",
+    "is_month_end": "month-end payday proximity",
+    "days_to_month_end": "the distance to month end",
+    "rsv_visitors": "booked visitors",
+    "rsv_count": "the number of bookings",
+    "rsv_visitors_ratio": "bookings relative to recent demand",
+}
+
+# The explanation writer appends a residual row so the attribution is not
+# trivially additive; it is not a model feature, so it is reported separately
+# instead of being counted as a driver.
+_RESIDUAL_FEATURE = "_residual"
+
+
+def _describe_factor(feature: str, impact: float) -> str:
+    """One signed driver as a sentence fragment, in visitor units."""
+    label = _FEATURE_TRANSLATIONS.get(feature, feature)
+    sign = "+" if impact >= 0 else "-"
+    return f"{label}: {sign}{abs(impact):.1f} visitors"
+
+
+@router.get("/{forecast_id}/explanation/summary", response_model=dict)
 def forecast_explanation_summary(
     forecast_id: uuid.UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_principal)],
 ) -> dict[str, Any]:
-    """Generate natural language SHAP-based explanation summary for a forecast.
-    
-    Translates technical SHAP values into human-readable factors driving the forecast.
-    """
-    _require_admin(current_user)
-    
-    # Get the forecast with model version info
-    forecast = db.get(Forecast, forecast_id)
-    if forecast is None:
-        raise _error(404, "not_found", "Forecast not found")
-    
-    # Get SHAP explanations for this forecast
-    shap_statements = []
-    
-    # Get explanations ordered by impact magnitude
-    explanations = db.exec(
-        select(ForecastExplanation)
-        .where(ForecastExplanation.forecast_id == forecast_id)
-        .order_by(ForecastExplanation.shap_impact.abs().desc())
-        .limit(10)
-    ).all()
-    
-    # Build human-readable statements
-    feature_translations = {
-        'lag_1': 'previous day\'s demand',
-        'lag_7': 'previous week\'s demand',
-        'lag_14': 'previous two weeks\' demand',
-        'roll_mean_7': '7-day average demand',
-        'roll_mean_28': '28-day average demand',
-        'roll_std_28': '28-day demand volatility',
-        'dow_mean_8w': 'mean of same weekday over 8 weeks',
-        'dow_std_8w': 'volatility of same weekday',
-        'trend_7_28': 'demand trend (7-day / 28-day ratio)',
-        'dow': 'day of week (0=Monday)',
-        'is_weekend': 'whether it\'s a weekend',
-        'month': 'month of year',
-        'week_of_year': 'week of year',
-        'is_holiday': 'public holiday',
-        'day_before_holiday': 'day before a holiday',
-        'day_after_holiday': 'day after a holiday',
-        'is_month_end': 'payday proximity',
-        'days_since_payday': 'days since 28th',
-        'service_type': 'service type (buffet/canteen/à la carte/café)',
-        'district': 'Kigali district or pilot region',
-        'seating_capacity': 'seating capacity',
-        'open_days_mask': 'which weekdays the site trades',
-        'reserved_count': 'reservations count',
-        'reserve_lead_mean': 'mean reservation lead time',
-        'has_reservation_source': 'whether location has reservation feed',
-    }
-    
-    # Build summary statements sorted by absolute SHAP impact
-    positive_factors = []
-    negative_factors = []
-    total_impact = Decimal('0')
-    
-    for exc in explanations:
-        feature_name = exc.feature_name
-        shap_impact = Decimal(str(exc.shap_impact))
-        total_impact += shap_impact
-        
-        if feature_name in feature_translations:
-            feature_desc = feature_translations[feature_name]
-            if shap_impact > 0:
-                positive_factors.append(
-                    f"{feature_desc}: +{abs(shap_impact):.1f} portions"
-                )
-            else:
-                negative_factors.append(
-                    f"{feature_desc}: -{abs(shap_impact):.1f} portions"
-                )
-    
-    # Determine the dominant factor
-    dominant_factor = None
-    if positive_factors:
-        dominant_factor = positive_factors[0]
-    elif negative_factors:
-        dominant_factor = negative_factors[0]
-    
-    # Generate plain-language summary
-    if dominant_factor:
-        summary = f"Your forecast is primarily driven by {dominant_factor}."
-    else:
-        summary = "Your forecast incorporates multiple demand drivers."
-    
-    # Build the response
-    result = {
-        "forecast_id": str(forecast_id),
-        "point_forecast": str(forecast.point_forecast),
-        "interval": [str(forecast.lower_bound), str(forecast.upper_bound)],
-        "coverage_target": str(forecast.coverage_target),
-        "summary": summary,
-        "total_drivers": len(explanations),
-        "positive_factors": positive_factors[:5],  # Top 5
-        "negative_factors": negative_factors[:5],  # Top 5
-        "dominant_factor": dominant_factor,
-        "total_log1p_impact": float(total_impact.quantize(Decimal('0.01'))),
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-    
-    return result
+    """Summarise a forecast's predictive attribution in plain language.
 
-# P1: Policy impact query endpoint
-@forecast_router.get("/{forecast_id}/policy/simulation", response_model=dict)
+    Reads the explanation rows persisted with the forecast, so the summary
+    describes the attribution that was actually generated rather than one
+    re-derived against today's data. Impacts are in visitor units.
+    """
+    row: Forecast | None = db.get(Forecast, forecast_id)
+    if row is None or row.workspace_id != current_user.workspace_id:
+        raise _error(404, "not_found", "Forecast not found")
+
+    # Largest magnitude first, in either direction: the "dominant" driver is
+    # the biggest mover, which is not necessarily the biggest *positive* one.
+    explanations = list(
+        db.scalars(
+            select(ForecastExplanation)
+            .where(ForecastExplanation.forecast_id == forecast_id)
+            .order_by(func.abs(ForecastExplanation.shap_impact).desc())
+        ).all()
+    )
+    if not explanations:
+        # Not persisted (e.g. a forecast created without `explain=True`): build
+        # the same rows transiently so the endpoint still answers, exactly as
+        # GET /{id}/explanation does.
+        fv = _get_feature_vector(db, row.location_id, row.target_date, row.as_of_timestamp)
+        explanations = build_explanation(
+            db, forecast_id=row.id, feature_vector=fv, point=float(row.point_forecast)
+        )
+
+    positive: list[str] = []
+    negative: list[str] = []
+    total_impact = 0.0
+    residual = 0.0
+    dominant: str | None = None
+    drivers = 0
+    for exc in explanations:
+        impact = float(exc.shap_impact)
+        if exc.feature_name == _RESIDUAL_FEATURE:
+            residual += impact
+            continue
+        drivers += 1
+        total_impact += impact
+        described = _describe_factor(exc.feature_name, impact)
+        if dominant is None:
+            dominant = described
+        (positive if impact >= 0 else negative).append(described)
+
+    summary = (
+        f"This forecast is led by {dominant}."
+        if dominant is not None
+        else "This forecast has no single dominant driver."
+    )
+
+    return {
+        "forecast_id": str(row.id),
+        "point_forecast": float(row.point_forecast),
+        "interval": [float(row.lower_bound), float(row.upper_bound)],
+        "coverage_target": float(row.coverage_target),
+        "attribution_type": "predictive",
+        "disclaimer": "Predictive attribution, not causal effect.",
+        "summary": summary,
+        "total_drivers": drivers,
+        "dominant_factor": dominant,
+        "positive_factors": positive[:5],
+        "negative_factors": negative[:5],
+        "total_impact_visitors": round(total_impact, 3),
+        "residual_visitors": round(residual, 3),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /{id}/policy/simulation — preparation-policy trade-off for this day
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{forecast_id}/policy/simulation", response_model=dict)
 def forecast_policy_simulation(
     forecast_id: uuid.UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_principal)],
 ) -> dict[str, Any]:
-    """Query policy simulation results for a given forecast.
-    
-    Returns surplus vs unmet trade-offs for each of the 4 preparation policies:
-    - historical_average: prepare based on historical average demand
-    - point_forecast: prepare based on the point forecast
-    - uncertainty_aware: prepare point forecast + uncertainty buffer (quantile 0.8)
-    - risk_aware: risk-adjusted preparation with risk_weight=2.00
+    """Simulate the four preparation policies on this forecast's day.
+
+    Computed on request through :func:`app.services.policy.simulate.
+    simulate_policies` — nothing is read from a stored row, and no figure is
+    filled in by hand. A policy that cannot be measured (no history, or a
+    target day with no observation yet) comes back with ``unavailable_reason``
+    rather than a fabricated quantity.
     """
-    _require_admin(current_user)
-    
-    # Get the forecast
-    forecast = db.get(Forecast, forecast_id)
-    if forecast is None:
+    row: Forecast | None = db.get(Forecast, forecast_id)
+    if row is None or row.workspace_id != current_user.workspace_id:
         raise _error(404, "not_found", "Forecast not found")
-    
-    # Get preparation policies
-    policies = db.exec(select(PreparationPolicy)).all()
-    
-    # Get the corresponding policy simulations
-    policy_simulations = db.exec(
-        select(PolicySimulation).where(
-            PolicySimulation.policy_id.in_([p.id for p in policies])
-        )
-    ).all()
-    
-    # Build simulation results map
-    sim_map = {}
-    for sim in policy_simulations:
-        policy_name = next((p.kind for p in policies if p.id == sim.policy_id), "unknown")
-        sim_map[policy_name] = {
-            "prepared_total": str(sim.prepared_total),
-            "surplus_sr": str(sim.surplus_sr),
-            "surplus_ps": str(sim.surplus_ps),
-            "unmet_ud": str(sim.unmet_ud),
-            "surplus_days": sim.surplus_days,
-            "unmet_days": sim.unmet_days,
+
+    results = simulate_policies(
+        db,
+        location_id=row.location_id,
+        target_date=row.target_date,
+        point=float(row.point_forecast),
+        lower=float(row.lower_bound),
+        upper=float(row.upper_bound),
+    )
+
+    simulations = {
+        r.policy: {
+            "prepared_qty": r.prepared_qty,
+            "surplus_sr": r.surplus_sr,
+            "surplus_ps": r.surplus_ps,
+            "unmet_ud": r.unmet_ud,
+            "surplus_days": r.surplus_days,
+            "unmet_days": r.unmet_days,
+            "quantile": r.quantile,
+            "lookback_days": r.lookback_days,
+            "risk_weight": r.risk_weight,
+            "unavailable_reason": r.unavailable_reason,
         }
-    
-    # Add policy-specific insights
-    insights = {}
-    if "historical_average" in sim_map:
-        # Historical average tends to have more surplus when demand is high,
-        # more unmet when demand is low
-        insights["historical_average"] = {
-            "pattern": "conservative preparation",
-            "trade_off": "more surplus when demand high, more unmet when demand low",
-        }
-    
-    if "uncertainty_aware" in sim_map:
-        insights["uncertainty_aware"] = {
-            "pattern": "risk-averse preparation",
-            "trade_off": "less unmet demand (340 vs 453), more surplus (562 vs 425)",
-            "recommended": True,
-        }
-    
-    if "risk_aware" in sim_map:
-        insights["risk_aware"] = {
-            "pattern": "risk-adjusted preparation",
-            "trade_off": "accepts more unmet (688) in exchange for controlled surplus (310)",
-            "risk_weight": 2.00,
-        }
-    
-    if "point_forecast" in sim_map:
-        insights["point_forecast"] = {
-            "pattern": "balanced preparation",
-            "trade_off": "moderate surplus (425) and moderate unmet (453)",
-        }
-    
-    return {
-        "forecast_id": str(forecast_id),
-        "point_forecast": str(forecast.point_forecast),
-        "simulations": sim_map,
-        "insights": insights,
-        "recommended_policy": "uncertainty_aware" if "uncertainty_aware" in sim_map else None,
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        for r in results
     }
 
-# P2: Drift detection endpoint
-from scipy import stats as scipy_stats
+    realised = next((r.realised_demand for r in results if r.realised_demand is not None), None)
 
-@forecast_router.get("/{forecast_id}/drift/monitoring", response_model=dict)
+    def _best(predicate: str) -> dict[str, Any] | None:
+        """Policy minimising ``predicate`` among the measurable ones."""
+        scored = [
+            (getattr(r, predicate), r.policy)
+            for r in results
+            if r.prepared_qty is not None and getattr(r, predicate) is not None
+        ]
+        if not scored:
+            return None
+        value, policy = min(scored)
+        return {"policy": policy, "value": value}
+
+    return {
+        "forecast_id": str(row.id),
+        "target_date": row.target_date.isoformat(),
+        "point_forecast": float(row.point_forecast),
+        "interval": [float(row.lower_bound), float(row.upper_bound)],
+        "realised_demand": realised,
+        "simulations": simulations,
+        "lowest_unmet_demand": _best("unmet_ud"),
+        "lowest_realised_surplus": _best("surplus_ps"),
+        "units": "visitor-equivalents",
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /{id}/drift/monitoring — site-level demand drift (PSI)
+# ---------------------------------------------------------------------------
+
+# Windows for the drift comparison, and the conventional PSI bands.
+_DRIFT_RECENT_DAYS = 30
+_DRIFT_BASELINE_DAYS = 90
+_DRIFT_MIN_OBSERVATIONS = 20
+_PSI_MONITOR = 0.10
+_PSI_RETRAIN = 0.25
+
+
+def _population_stability_index(
+    recent: list[int], baseline: list[int], bins: int = 10
+) -> float | None:
+    """PSI between two demand samples over shared, data-defined bins.
+
+    Bins span the combined range so both samples are measured on the same
+    scale. A bin with no members is floored at ``1e-4`` (the standard epsilon)
+    rather than being dropped, which would silently renormalise the index.
+    """
+    if not recent or not baseline:
+        return None
+    low = float(min(min(recent), min(baseline)))
+    high = float(max(max(recent), max(baseline)))
+    if high <= low:
+        return 0.0
+    width = (high - low) / bins
+
+    def _counts(values: list[int]) -> list[int]:
+        out = [0] * bins
+        for value in values:
+            idx = min(int((value - low) / width), bins - 1)
+            out[idx] += 1
+        return out
+
+    recent_counts, baseline_counts = _counts(recent), _counts(baseline)
+    psi = 0.0
+    for i in range(bins):
+        p_recent = max(recent_counts[i] / len(recent), 1e-4)
+        p_baseline = max(baseline_counts[i] / len(baseline), 1e-4)
+        psi += (p_recent - p_baseline) * math.log(p_recent / p_baseline)
+    return round(psi, 4)
+
+
+@router.get("/{forecast_id}/drift/monitoring", response_model=dict)
 def forecast_drift_monitoring(
     forecast_id: uuid.UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_principal)],
 ) -> dict[str, Any]:
-    """Monitor forecast drift by comparing recent data distribution vs training distribution.
-    
-    Implements Population Stability Index (PSI) monitoring:
-    - PSI < 0.1: No significant change
-    - 0.1 <= PSI < 0.25: Moderate change, monitor
-    - PSI >= 0.25: Significant change, retrain model
+    """Measure demand drift for the forecast's location.
+
+    PSI compares the location's recent demand distribution with its own earlier
+    baseline window. The model version's training window is reported for
+    context but is *not* the baseline: the serving booster was trained on the
+    Recruit dataset, whose dates do not overlap this workspace's, so a
+    train/serve PSI could never be computed here. What this answers is the
+    servable question — has this site's demand moved away from what it used to
+    look like? Bands: <0.1 no change, 0.10-0.25 monitor, >=0.25 retrain.
     """
-    _require_admin(current_user)
-    
-    # Get the forecast and its model version
-    forecast = db.get(Forecast, forecast_id)
-    if forecast is None:
+    row: Forecast | None = db.get(Forecast, forecast_id)
+    if row is None or row.workspace_id != current_user.workspace_id:
         raise _error(404, "not_found", "Forecast not found")
-    
-    # Get the model version
-    model_version = db.get(ModelVersion, forecast.model_version_id)
-    if model_version is None:
-        raise _error(404, "not_found", "Model version not found")
-    
-    # Get recent demand observations for this location
-    recent_observations = db.exec(
-        select(DemandObservation)
-        .where(
-            DemandObservation.workspace_id == forecast.workspace_id,
-            DemandObservation.location_id == forecast.location_id,
-        )
-        .order_by(DemandObservation.target_date.desc())
-        .limit(30)
-    ).all()
-    
-    # Get the training period from the model version
-    train_start = model_version.train_start
-    train_end = model_version.train_end
-    
-    # Calculate Population Stability Index (PSI)
-    psi_value = None
-    drift_status = "unknown"
-    drift_reason = ""
-    
-    if len(recent_observations) >= 20:
-        # Bin the data into 10 quantile bins
-        # Training data distribution
-        train_observations = db.exec(
+
+    model_version: ModelVersion | None = db.get(ModelVersion, row.model_version_id)
+
+    recent_rows = list(
+        db.scalars(
             select(DemandObservation)
             .where(
-                DemandObservation.workspace_id == forecast.workspace_id,
-                DemandObservation.target_date >= train_start,
-                DemandObservation.target_date <= train_end,
+                DemandObservation.location_id == row.location_id,
+                DemandObservation.date < row.target_date,
             )
+            .order_by(DemandObservation.date.desc())
+            .limit(_DRIFT_RECENT_DAYS)
         ).all()
-        
-        if len(train_observations) > 0:
-            # Calculate observed frequencies in each bin
-            all_obs = recent_observations + train_observations
-            observed_vals = [o.demand_qty for o in all_obs]
-            
-            # Create bins based on the full range
-            min_val = min(all_obs)
-            max_val = max(all_obs)
-            bin_width = (max_val - min_val + 1) / 10  # 10 bins
-            
-            # Count observations in each bin for recent and training data
-            recent_bins = [0] * 10
-            train_bins = [0] * 10
-            
-            for val in [o.demand_qty for o in recent_observations]:
-                bin_idx = min(int((val - min_val) / bin_width), 9)
-                recent_bins[bin_idx] += 1
-            
-            for val in [o.demand_qty for o in train_observations]:
-                bin_idx = min(int((val - min_val) / bin_width), 9)
-                train_bins[bin_idx] += 1
-            
-            # Calculate PSI
-            psi = Decimal('0')
-            for i in range(10):
-                # Avoid log(0) - add small epsilon
-                recent_p = max(Decimal('0.001'), Decimal(str(recent_bins[i] / len(recent_observations))))
-                train_p = max(Decimal('0.001'), Decimal(str(train_bins[i] / len(train_observations))))
-                
-                if recent_p > 0 and train_p > 0:
-                    psi += (recent_p - train_p) * math.log(recent_p / train_p)
-            
-            psi_value = float(psi.quantize(Decimal('0.001')))
-            
-            # Determine drift status
-            if psi < 0.1:
-                drift_status = "no_change"
-                drift_reason = "No significant distribution change detected"
-            elif psi < 0.25:
-                drift_status = "moderate_change"
-                drift_reason = "Moderate distribution change detected - monitor recommended"
-            else:
-                drift_status = "significant_change"
-                drift_reason = "Significant distribution change detected - model retraining recommended"
-    else:
-        psi_value = None
-        drift_status = "insufficient_data"
-        drift_reason = "Insufficient recent observations for drift detection (minimum 20 required)"
-    
-    # Get current PSI from audit log if available
-    # Check for any drift alerts
-    recent_alerts = db.exec(
-        select(Alert).where(
-            Alert.alert_type == "drift",
-            Alert.created_at >= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30),
+    )
+    recent = [int(r.demand_qty) for r in recent_rows]
+
+    baseline_end = row.target_date - datetime.timedelta(days=_DRIFT_RECENT_DAYS)
+    baseline_start = baseline_end - datetime.timedelta(days=_DRIFT_BASELINE_DAYS)
+    baseline_rows = list(
+        db.scalars(
+            select(DemandObservation)
+            .where(
+                DemandObservation.location_id == row.location_id,
+                DemandObservation.date >= baseline_start,
+                DemandObservation.date < baseline_end,
+            )
+            .order_by(DemandObservation.date.asc())
+        ).all()
+    )
+    baseline = [int(r.demand_qty) for r in baseline_rows]
+
+    psi: float | None = None
+    if len(recent) < _DRIFT_MIN_OBSERVATIONS or len(baseline) < _DRIFT_MIN_OBSERVATIONS:
+        status = "insufficient_data"
+        reason = (
+            f"Needs at least {_DRIFT_MIN_OBSERVATIONS} observed days in both windows "
+            f"(recent {len(recent)}, baseline {len(baseline)})."
         )
-    ).all() if False else []  # Disabled for simplicity
-    
+    else:
+        psi = _population_stability_index(recent, baseline)
+        if psi is None:
+            status, reason = "insufficient_data", "No overlap to compare."
+        elif psi < _PSI_MONITOR:
+            status, reason = "no_change", "No significant distribution change detected."
+        elif psi < _PSI_RETRAIN:
+            status, reason = "moderate_change", "Moderate change detected - monitor."
+        else:
+            status, reason = "significant_change", "Significant change - retrain recommended."
+
     return {
-        "forecast_id": str(forecast_id),
-        "model_version": model_version.algorithm,
-        "feature_set_version": model_version.feature_set_version,
-        "psi": psi_value,
-        "drift_status": drift_status,
-        "drift_reason": drift_reason,
-        "recent_observations_count": len(recent_observations),
-        "training_period": f"{train_start} to {train_end}",
+        "forecast_id": str(row.id),
+        "location_id": str(row.location_id),
+        "model_version": model_version.algorithm if model_version is not None else None,
+        "feature_set_version": (
+            model_version.feature_set_version if model_version is not None else None
+        ),
+        "psi": psi,
+        "drift_status": status,
+        "drift_reason": reason,
+        "windows": {
+            "recent_days": _DRIFT_RECENT_DAYS,
+            "baseline_days": _DRIFT_BASELINE_DAYS,
+            "baseline_from": baseline_start.isoformat(),
+            "baseline_to": baseline_end.isoformat(),
+            "recent_count": len(recent),
+            "baseline_count": len(baseline),
+            "baseline_kind": "prior_history",
+        },
+        "model_training_window": (
+            {
+                "start": (
+                    model_version.train_start.isoformat() if model_version.train_start else None
+                ),
+                "end": model_version.train_end.isoformat() if model_version.train_end else None,
+                "note": "context only - a different dataset, not the PSI baseline",
+            }
+            if model_version is not None
+            else None
+        ),
         "recommendation": {
-            "action": "continue_monitoring" if drift_status in ["no_change", "moderate_change"] else "retrain_model",
-            "psi_threshold": 0.25,
-            "current_psi": psi_value,
-        } if psi_value is not None else None,
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "action": "retrain_model" if status == "significant_change" else "continue_monitoring",
+            "psi_threshold": _PSI_RETRAIN,
+            "current_psi": psi,
+        },
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }

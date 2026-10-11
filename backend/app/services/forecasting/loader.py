@@ -652,8 +652,6 @@ def predict_point(
 
     model_version = get_production_model(db, workspace_id)
     feature_set_version = model_version.feature_set_version or "v1"
-    if not feature_set_version:
-        feature_set_version = "v1"
 
     # Build features — also gives history_days for the fallback decision.
     # When a serving bundle is configured, the model needs the FULL training

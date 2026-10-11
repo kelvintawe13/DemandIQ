@@ -27,7 +27,7 @@ Live — `grep prefix= backend/app/routers/*.py`; registration at `backend/app/m
 | `health.py`      | `/health`, `/api/v1/health`                                                  | Public                            | 2     |
 | `access.py`      | `/api/v1/locations/access-logs`, `/api/v1/audit-log`                         | JWT/admin                         | 2     |
 | `ingest.py`      | `/api/v1/ingest/*`                                                           | JWT; file/image multipart         | 8     |
-| `forecasts.py`   | `/api/v1/forecasts`, `/forecasts/batch`, `/{id}/explanation`                 | JWT                               | 6     |
+| `forecasts.py`   | `/api/v1/forecasts`, `/forecasts/batch`, `/{id}/explanation[/summary]`, `/{id}/policy/simulation`, `/{id}/drift/monitoring` | JWT                               | 9     |
 | `policies.py`    | `/api/v1/policies`, `/policies/simulate`                                     | JWT; PATCH admin → change_request | 3     |
 | `quality.py`     | `/api/v1/quality/*`                                                          | JWT                               | 5     |
 | `alerts.py`      | `/api/v1/alerts*`                                                            | JWT                               | 6     |

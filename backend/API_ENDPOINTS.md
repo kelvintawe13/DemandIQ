@@ -75,6 +75,9 @@ Base URL: `/api/v1` — **177 paths → 213 items** (`openapi.json` via `backend
 | `GET`  | `/forecasts`                              | Query by `location_id`, `from`, `to`. Historical forecasts with realized demand once known.                                                  |
 | `GET`  | `/forecasts/{id}`                         | One forecast with its interval, policy outcome and realized demand.                                                                          |
 | `GET`  | `/forecasts/{id}/explanation`             | SHAP contributions: `feature`, `value`, `impact` in visitor units.                                                                           |
+| `GET`  | `/forecasts/{id}/explanation/summary`     | The same attribution as a plain-language summary: `summary`, `dominant_factor`, `positive_factors`, `negative_factors`, `total_drivers`, `total_impact_visitors`, `residual_visitors`. Visitor units; predictive, not causal. |
+| `GET`  | `/forecasts/{id}/policy/simulation`       | The four preparation policies simulated on this forecast's day: per-policy `prepared_qty`, `surplus_sr`, `surplus_ps`, `unmet_ud`, plus `lowest_unmet_demand` / `lowest_realised_surplus`. A rule with nothing to measure returns `null` with `unavailable_reason`, never a stand-in number. |
+| `GET`  | `/forecasts/{id}/drift/monitoring`        | Site-level demand drift: PSI between the location's last 30 observed days and its prior 90-day baseline, with `drift_status` (<0.10 `no_change`, 0.10-0.25 `moderate_change`, >=0.25 `significant_change`) and a `recommendation`. |
 | `GET`  | `/forecasts/{id}/export?format=csv\|xlsx` | File download of the forecast window.                                                                                                        |
 | `POST` | `/forecasts/batch`                        | Nightly job hook; forecasts every forecastable location.                                                                                     |
 

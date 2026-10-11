@@ -17,8 +17,11 @@ Absolute rules honoured here
   the establishment's own past only.
 * Temporal split: train = observed_on <= 2018-09-30, test = later. The wrong
   kind of shuffle would leak an establishment's future into its past.
+* Test window scored ONCE. The train window is split chronologically 90/10;
+  the 10% validation tail is what early stopping and the conformal half-width
+  read. Nothing tunes on test (PIPELINE.md 6.2/6.3).
 * Baseline to beat: per-establishment trailing median (what a kitchen would
-  guess with a notebook and yesterday's numbers).
+  guess with a notebook and yesterday's numbers), with a train-median fallback.
 
 Usage:
     cd model && .venv/bin/python scripts/train_waste_model.py \
@@ -65,15 +68,24 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
         roll28 = w.shift(1).rolling(28, min_periods=10).mean()
         std14 = w.shift(1).rolling(14, min_periods=5).std()
         prev = w.shift(1)
-        gap = dates.diff().dt.days.shift(1)  # days since previous observation
-        dow = dates.dt.dayofweek
-        month = dates.dt.month
-        cum_n = np.arange(len(g))
+        # Calendar features describe the day being PREDICTED (the next observed
+        # date), not the row's own date: the label is ``target_next``, so reading
+        # the current row's dow/month would be off by one observation. The target
+        # date is known when the forecast is made, so this is not leakage.
+        target_date = dates.shift(-1)
+        # Days since the previous observation for THIS row (no extra shift — the
+        # old ``.shift(1)`` reported the gap two rows back, contradicting the name).
+        gap = dates.diff().dt.days
+        dow = target_date.dt.dayofweek
+        month = target_date.dt.month
+        # No ``cum_n`` row counter: its train and test ranges are disjoint
+        # (train <= cutoff < test), so a tree could split on it as a regime flag.
         cum_mean = w.shift(1).expanding(min_periods=3).mean()
         d = pd.DataFrame(
             {
                 "est": est,
                 "date": dates,
+                "target_date": target_date,
                 "target_next": w.shift(-1),
                 "prev_waste": prev,
                 "roll7_median": roll7,
@@ -81,7 +93,6 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
                 "roll28_mean": roll28,
                 "std14": std14,
                 "gap_days_since_prev": gap,
-                "cum_n": cum_n,
                 "cum_mean": cum_mean,
                 "dow": dow,
                 "month": month,
@@ -97,9 +108,14 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     return feat
 
 
-def trailing_median_baseline(feat: pd.DataFrame) -> np.ndarray:
-    """Per-establishment trailing median; falls back to global train median."""
-    return feat["roll14_median"].fillna(feat["roll28_mean"]).fillna(0.0).to_numpy()
+def trailing_median_baseline(feat: pd.DataFrame, fallback_kg: float) -> np.ndarray:
+    """Per-establishment trailing median; falls back to a 28-day mean, then the
+    training-target median (the global fallback the docstring always claimed).
+
+    Evaluating this on the test frame is legitimate — it is a fixed rule, not a
+    fitted quantity — and the fallback comes from the train window only.
+    """
+    return feat["roll14_median"].fillna(feat["roll28_mean"]).fillna(fallback_kg).to_numpy()
 
 
 FEATURES = [
@@ -109,7 +125,6 @@ FEATURES = [
     "roll28_mean",
     "std14",
     "gap_days_since_prev",
-    "cum_n",
     "cum_mean",
     "dow",
     "month",
@@ -122,16 +137,29 @@ def main() -> int:
     t0 = time.time()
     repo = Path(__file__).resolve().parents[2]
     csv_path = repo / "model" / "data" / "urban-waste" / FTD
-    artifacts_dir = Path(sys.argv[sys.argv.index("--artifacts") + 1]) if "--artifacts" in sys.argv else repo / "model" / "artifacts" / "runs" / "real"
+    artifacts_dir = (
+        Path(sys.argv[sys.argv.index("--artifacts") + 1])
+        if "--artifacts" in sys.argv
+        else repo / "model" / "artifacts" / "runs" / "real"
+    )
 
     frame = load_frame(csv_path)
     feat = build_features(frame)
-    train = feat[feat["date"] <= TEST_CUTOFF]
-    test = feat[feat["date"] > TEST_CUTOFF]
+    train = feat[feat["date"] <= TEST_CUTOFF].sort_values("date")
+    test = feat[feat["date"] > TEST_CUTOFF].sort_values("date")
     if len(test) < 200:
         raise SystemExit("Temporal test slice unexpectedly small — check cutoff")
 
-    X_train, y_train = train[FEATURES].copy(), train["target_next"].to_numpy()
+    # Chronological fit / validation split *inside* the train window. Early
+    # stopping and the conformal half-width both read this validation tail; the
+    # test window is scored exactly once and tunes nothing (PIPELINE.md 6.2/6.3).
+    split_at = int(len(train) * 0.9)
+    fit, valid = train.iloc[:split_at], train.iloc[split_at:]
+    if len(valid) < 50:
+        raise SystemExit("Validation tail too small — check the temporal split")
+
+    X_fit, y_fit = fit[FEATURES].copy(), fit["target_next"].to_numpy()
+    X_valid, y_valid = valid[FEATURES].copy(), valid["target_next"].to_numpy()
     X_test, y_test = test[FEATURES].copy(), test["target_next"].to_numpy()
     num_features = FEATURES
 
@@ -157,8 +185,8 @@ def main() -> int:
         "seed": 42,
         "verbosity": -1,
     }
-    dtrain = lgb.Dataset(X_train, y_train, feature_name=num_features)
-    dvalid = lgb.Dataset(X_test, y_test, feature_name=num_features, reference=dtrain)
+    dtrain = lgb.Dataset(X_fit, y_fit, feature_name=num_features)
+    dvalid = lgb.Dataset(X_valid, y_valid, feature_name=num_features, reference=dtrain)
     booster = lgb.train(
         params,
         dtrain,
@@ -168,7 +196,7 @@ def main() -> int:
     )
 
     pred = booster.predict(X_test, num_iteration=booster.best_iteration)
-    base = trailing_median_baseline(test)
+    base = trailing_median_baseline(test, float(train["target_next"].median()))
 
     def eval_block(y, p, name):
         err = np.abs(y - p)
@@ -184,12 +212,15 @@ def main() -> int:
     m_lgbm = eval_block(y_test, pred, "lightgbm_temporal")
     m_base = eval_block(y_test, base, "trailing_median_baseline")
 
-    # Conformal half-width from in-sample calibration residuals (simple split
-    # conformal on the tail of the train window — waste-side ACI reference).
-    cal_tail = train.tail(400)
-    cal_pred = booster.predict(cal_tail[FEATURES], num_iteration=booster.best_iteration)
-    cal_resid = np.abs(cal_tail["target_next"].to_numpy() - cal_pred)
-    q90 = float(np.quantile(cal_resid, 0.9))
+    # Split conformal on the validation tail — rows the booster never saw. The
+    # old version calibrated on ``train.tail(400)``, which the model had already
+    # been fitted on, so the half-width was optimistic. Same quantile rule as the
+    # demand pipeline: "higher" interpolation plus the finite-sample (1 + 1/n)
+    # inflation, so the band is never narrower than the target.
+    val_pred = booster.predict(X_valid, num_iteration=booster.best_iteration)
+    cal_resid = np.abs(y_valid - val_pred)
+    n_cal = int(cal_resid.size)
+    q90 = float(np.quantile(cal_resid, 0.9, method="higher") * (1 + 1 / n_cal))
 
     store = CheckpointStore(artifacts_dir)
     payload = {
@@ -199,9 +230,20 @@ def main() -> int:
             "doi": "10.5281/zenodo.3355300",
             "evidence_boundary": "waste-only; no demand coupling (Ch 3.21)",
         },
-        "split": {"train_until": str(TEST_CUTOFF.date()), "test_after": str(TEST_CUTOFF.date())},
+        "split": {
+            "train_until": str(TEST_CUTOFF.date()),
+            "test_after": str(TEST_CUTOFF.date()),
+            "fit_validation": "chronological 90/10 tail of the train window",
+        },
         "n_train": len(train),
+        "n_fit": len(fit),
+        "n_valid": len(valid),
         "n_test": len(test),
+        "evaluation_discipline": (
+            "test scored once; early stopping and conformal calibration use the "
+            "validation tail only"
+        ),
+        "conformal_calibration_n": n_cal,
         "establishments_test": int(test["est"].nunique()),
         "imputation": "none — gap_days_since_prev + has_history carry missingness honestly",
         "metrics_lgbm": m_lgbm,
@@ -224,7 +266,8 @@ def main() -> int:
 
     print("== URBAN-WASTE predictive model (real data, temporal split) ==")
     print(
-        f"train n={payload['n_train']} (until {TEST_CUTOFF.date()}), "
+        f"train n={payload['n_train']} (until {TEST_CUTOFF.date()}) "
+        f"[fit {payload['n_fit']} / validation {payload['n_valid']}], "
         f"test n={payload['n_test']} across {payload['establishments_test']} establishments"
     )
     print(
