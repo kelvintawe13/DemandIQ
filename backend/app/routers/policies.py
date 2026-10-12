@@ -300,7 +300,6 @@ def simulate(
         # average resolution + dummy forecast = historical mean, so that the
         # trade-off is still demonstrable without requiring forecast rows.
         # We emit one aggregated row per policy across the period.
-        from app.services.feature_build import build_features
         from app.services.forecasting.conformal import build_interval
         from app.services.forecasting.loader import predict_point
 
@@ -340,12 +339,14 @@ def simulate(
                         target_date=cur,
                         as_of=as_of,
                     )
-                    fv = build_features(db, location_id=loc.id, target_date=cur, as_of=as_of)
+                    # The vector the point was computed from — carried on the
+                    # result so the interval below cannot be built from a
+                    # different feature set than the point it wraps.
                     iv = build_interval(
                         db,
                         model_version_id=pr.model_version.id,
                         point=pr.point,
-                        feature_vector=fv,
+                        feature_vector=pr.feature_vector,
                         coverage_target=0.90,
                     )
                     pt, lo, up = pr.point, iv.lower, iv.upper

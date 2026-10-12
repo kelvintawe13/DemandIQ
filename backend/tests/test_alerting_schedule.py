@@ -313,11 +313,17 @@ def test_generate_forecast_wires_predict_interval_and_persist(monkeypatch) -> No
     class _ModelVersion:
         id = uuid.uuid4()
 
+    # The vector the point was computed from travels on the result; the
+    # interval and the attribution must receive this same object rather than
+    # rebuilding one (two builders is how they drifted apart).
+    serving_vector = MagicMock(name="feature_vector")
+
     class _Point:
         point = 42.0
         fallback = False
         feature_set_version = "fs-2026.09.2"
         model_version = _ModelVersion()
+        feature_vector = serving_vector
 
     class _Interval:
         lower = 30.0
@@ -336,13 +342,10 @@ def test_generate_forecast_wires_predict_interval_and_persist(monkeypatch) -> No
         assert kw["as_of"] == as_of and kw["target_date"] == target
         return _Point()
 
-    def fake_features(db, **kw):  # type: ignore[no-untyped-def]
-        calls.append("features")
-        return MagicMock(name="feature_vector")
-
     def fake_interval(db, **kw):  # type: ignore[no-untyped-def]
         calls.append("interval")
         assert kw["point"] == 42.0
+        assert kw["feature_vector"] is serving_vector
         return _Interval()
 
     def fake_persist(db, **kw):  # type: ignore[no-untyped-def]
@@ -353,10 +356,10 @@ def test_generate_forecast_wires_predict_interval_and_persist(monkeypatch) -> No
 
     def fake_explain(db, **kw):  # type: ignore[no-untyped-def]
         calls.append("explain")
+        assert kw["feature_vector"] is serving_vector
         return []
 
     monkeypatch.setattr(gen, "predict_point", fake_predict)
-    monkeypatch.setattr(gen, "build_features", fake_features)
     monkeypatch.setattr(gen, "build_interval", fake_interval)
     monkeypatch.setattr(gen, "persist_forecast", fake_persist)
     monkeypatch.setattr(gen, "build_explanation", fake_explain)
@@ -369,9 +372,10 @@ def test_generate_forecast_wires_predict_interval_and_persist(monkeypatch) -> No
         target_date=target,
         as_of=as_of,
     )
-    assert calls == ["predict", "features", "interval", "persist"]
+    assert calls == ["predict", "interval", "persist"]
     assert (plain.point, plain.lower, plain.upper) == (42.0, 30.0, 55.0)
     assert plain.id == plain.row.id
+    assert plain.feature_vector is serving_vector
 
     # explain=True adds exactly the attribution row, after the forecast exists.
     explained = gen.generate_forecast(
@@ -403,7 +407,6 @@ def test_generate_forecast_defaults_a_naive_as_of_to_utc(monkeypatch) -> None:
         "predict_point",
         lambda db, **kw: seen.update(kw) or MagicMock(model_version=MagicMock(id=1)),
     )
-    monkeypatch.setattr(gen, "build_features", lambda db, **kw: MagicMock())
     monkeypatch.setattr(
         gen,
         "build_interval",

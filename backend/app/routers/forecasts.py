@@ -32,10 +32,16 @@ from app.models.location import DemandObservation, Location
 from app.models.location_access import LocationAccessLog
 from app.models.user import User
 from app.security.api_key_auth import ApiKeyPrincipal, get_principal, require_write_scope
-from app.services.explain.shap import build_explanation, get_explanation
-from app.services.feature_build import FeatureVector, build_features
+from app.services.explain.shap import (
+    RESIDUAL_FEATURE,
+    attribution_source_of,
+    build_explanation,
+    get_explanation,
+)
+from app.services.feature_build import FeatureVector
 from app.services.forecasting.conformal import DEFAULT_COVERAGE
 from app.services.forecasting.generate import generate_forecast
+from app.services.forecasting.loader import build_serving_vector
 from app.services.policy.simulate import simulate_policies
 
 logger = logging.getLogger(__name__)
@@ -113,7 +119,14 @@ def _get_feature_vector(
     target_date: datetime.date,
     as_of: datetime.datetime,
 ) -> FeatureVector:
-    return build_features(db, location_id=location_id, target_date=target_date, as_of=as_of)
+    """The features behind a stored forecast, rebuilt for its own boundary.
+
+    Delegates to :func:`build_serving_vector` so a forecast explained after the
+    fact is hydrated with the same feature set the model was served on — the
+    full trained columns and the bundle's holiday calendar — rather than the
+    legacy stub vector.
+    """
+    return build_serving_vector(db, location_id=location_id, target_date=target_date, as_of=as_of)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +408,10 @@ def get_forecast_explanation(
     return {
         "forecast_id": str(row.id),
         "attribution_type": "predictive",
+        # Where these numbers came from: the served model, or the labelled
+        # placeholder. Their values cannot tell the two apart, so the answer
+        # travels with them (migration 020).
+        "attribution_source": attribution_source_of(explanations),
         "disclaimer": "Predictive attribution, not causal effect.",
         "contributions": [
             {
@@ -625,10 +642,11 @@ _FEATURE_TRANSLATIONS: dict[str, str] = {
     "rsv_visitors_ratio": "bookings relative to recent demand",
 }
 
-# The explanation writer appends a residual row so the attribution is not
-# trivially additive; it is not a model feature, so it is reported separately
-# instead of being counted as a driver.
-_RESIDUAL_FEATURE = "_residual"
+# The explanation writer appends a residual row (the model's expected value,
+# rather than a feature); it is not a driver, so it is reported separately
+# instead of being counted as one. The name comes from the writer so the two
+# cannot disagree about which row to exclude.
+_RESIDUAL_FEATURE = RESIDUAL_FEATURE
 
 
 def _describe_factor(feature: str, impact: float) -> str:
@@ -702,6 +720,7 @@ def forecast_explanation_summary(
         "interval": [float(row.lower_bound), float(row.upper_bound)],
         "coverage_target": float(row.coverage_target),
         "attribution_type": "predictive",
+        "attribution_source": attribution_source_of(explanations),
         "disclaimer": "Predictive attribution, not causal effect.",
         "summary": summary,
         "total_drivers": drivers,

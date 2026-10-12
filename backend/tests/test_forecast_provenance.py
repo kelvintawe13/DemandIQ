@@ -231,17 +231,18 @@ def test_forecast_detail_reads_the_flag_without_rebuilding_features(monkeypatch:
 
     Recomputing asked today's demand history to explain a forecast made at the
     row's ``as_of_timestamp``, so a row written as a fallback could read back as
-    a model forecast. Any feature rebuild here is the bug, so this makes one
-    impossible.
+    a model forecast. Any feature build here is the bug, so this makes one
+    impossible — it is patched at the router's only entry point for one
+    (``build_serving_vector``, which replaced a direct ``build_features`` call).
     """
     from app.routers import forecasts as router_mod
 
     def _boom(*a: object, **k: object) -> None:
-        raise AssertionError("the flag must come from the row, not from a feature rebuild")
+        raise AssertionError("the flag must come from the row, not from a feature build")
 
     ws = uuid.uuid4()
     row = _forecast_row(ws, fallback=True)
-    monkeypatch.setattr(router_mod, "build_features", _boom)  # type: ignore[attr-defined]
+    monkeypatch.setattr(router_mod, "build_serving_vector", _boom)
     client = _client_with(row, ws)
 
     resp = client.get(f"/api/v1/forecasts/{row.id}")

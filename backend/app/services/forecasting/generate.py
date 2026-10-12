@@ -1,9 +1,9 @@
 """One place that turns a (location, date) pair into a persisted forecast.
 
-Three callers used to spell out the same five steps — ``predict_point`` →
-``build_features`` → ``build_interval`` → ``persist_forecast`` → optional
-``build_explanation``: ``POST /forecasts``, ``POST /forecasts/batch`` and the
-nightly ``forecast_publish`` job. Keeping them separate meant the batch endpoint
+Three callers used to spell out the same four steps — ``predict_point`` →
+``build_interval`` → ``persist_forecast`` → optional ``build_explanation``:
+``POST /forecasts``, ``POST /forecasts/batch`` and the nightly
+``forecast_publish`` job. Keeping them separate meant the batch endpoint
 could drift from the nightly job (different coverage target, a missing SHAP
 row, a different ``as_of``) without any test noticing.
 
@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.models.forecast import Forecast
 from app.services.explain.shap import build_explanation
-from app.services.feature_build import FeatureVector, build_features
+from app.services.feature_build import FeatureVector
 from app.services.forecasting.conformal import build_interval
 from app.services.forecasting.loader import predict_point
 from app.services.forecasting.persist import persist_forecast
@@ -115,9 +115,12 @@ def generate_forecast(
         as_of=as_of,
         horizon_days=horizon_days,
     )
-    feature_vector = build_features(
-        db, location_id=location_id, target_date=target_date, as_of=as_of
-    )
+    # The vector comes back with the point: it is the one the model was served
+    # on (full trained feature set + the bundle's holiday calendar when a
+    # bundle exists), so the interval and the attribution below describe the
+    # same row. Rebuilding it here — with the legacy builder — is what made the
+    # point and its explanation describe different feature sets.
+    feature_vector = result.feature_vector
     interval = build_interval(
         db,
         model_version_id=result.model_version.id,

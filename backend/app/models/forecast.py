@@ -5,11 +5,26 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Numeric, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, MutableJSONB
+
+#: Values of ``ForecastExplanation.attribution_source``. Imported by the writer
+#: and the read side so the two cannot disagree about what a row means.
+ATTRIBUTION_BOOSTER = "booster"
+ATTRIBUTION_STUB = "stub"
 
 
 class ModelVersion(Base):
@@ -123,3 +138,22 @@ class ForecastExplanation(Base):
     # Also in demand units: an attribution with a magnitude that tracks the
     # forecast, so it needs the forecast's range (migration 015).
     shap_impact: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)  # type: ignore[assignment]
+    # Which path produced this row: the served booster's own TreeSHAP
+    # (``booster``) or the placeholder used when no model is loaded (``stub``),
+    # which carries no information about demand. Stored rather than inferred
+    # because the two are indistinguishable from the numbers alone, and because
+    # the row must keep describing the run that wrote it even after a bundle is
+    # installed (migration 020).
+    attribution_source: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=ATTRIBUTION_STUB
+    )
+
+    # Named without the table prefix: the metadata convention is
+    # ``ck_%(table_name)s_%(constraint_name)s``, so the constraint is created as
+    # ``ck_forecast_explanations_attribution_source`` — the name migration 020
+    # and database/schema.sql use. Passing the full name here (as
+    # ``demand_observations`` does) doubles the prefix and leaves the ORM
+    # disagreeing with the database about a constraint it did not create.
+    __table_args__ = (  # type: ignore[assignment]
+        CheckConstraint("attribution_source IN ('booster', 'stub')", name="attribution_source"),
+    )

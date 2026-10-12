@@ -668,7 +668,10 @@ SETTING_DEFAULTS: dict[str, dict[str, Any]] = {
     # An organisation joining the platform to have its operation managed here
     # must own its workspace from the first minute; a viewer seat would leave
     # the first user unable to create even a location (RBAC blocks writes).
-    "default_role": {"value": "owner", "description": "Seat granted to new sign-ups (owner by default)"},
+    "default_role": {
+        "value": "owner",
+        "description": "Seat granted to new sign-ups (owner by default)",
+    },
     "announcement": {
         "value": "",
         "description": "Banner text shown to every signed-in user ('' = none)",

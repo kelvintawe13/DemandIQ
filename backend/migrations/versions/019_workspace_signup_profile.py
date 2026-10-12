@@ -30,7 +30,10 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("workspaces", sa.Column("location_count", sa.Integer(), nullable=True))
     op.add_column("workspaces", sa.Column("daily_covers", sa.Integer(), nullable=True))
-    op.add_column("workspaces", sa.Column("data_sources", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True))
+    op.add_column(
+        "workspaces",
+        sa.Column("data_sources", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
+    )
 
 
 def downgrade() -> None:

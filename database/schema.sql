@@ -250,7 +250,13 @@ CREATE TABLE forecast_explanations (
   forecast_id         UUID NOT NULL REFERENCES forecasts(id) ON DELETE CASCADE,
   feature_name        TEXT NOT NULL,
   feature_value       TEXT,
-  shap_impact         NUMERIC(10,3) NOT NULL   -- visitor units, signed
+  shap_impact         NUMERIC(10,3) NOT NULL,  -- visitor units, signed
+  -- Which path wrote the row: the served booster's TreeSHAP, or the labelled
+  -- placeholder used when no model is loaded (migration 020). The two cannot be
+  -- told apart from the numbers, and only one of them is model evidence.
+  attribution_source  TEXT NOT NULL DEFAULT 'stub'
+    CONSTRAINT ck_forecast_explanations_attribution_source
+    CHECK (attribution_source IN ('booster', 'stub'))
 );
 
 CREATE TYPE policy_kind AS ENUM ('historical_average','point_forecast','uncertainty_aware','risk_aware');

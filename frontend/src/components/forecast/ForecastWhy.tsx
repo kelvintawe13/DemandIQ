@@ -30,6 +30,12 @@ interface Contribution {
 interface ExplanationResponse {
   forecast_id: string;
   attribution_type?: string;
+  /**
+   * Which path wrote these drivers: `booster` (the served model's own TreeSHAP)
+   * or `stub` (the placeholder used when no model is loaded). The values alone
+   * cannot tell the two apart, and only one of them is model evidence.
+   */
+  attribution_source?: 'booster' | 'stub' | 'mixed' | string | null;
   disclaimer?: string;
   contributions: Contribution[];
 }
@@ -76,6 +82,7 @@ interface ForecastWhyProps {
 export function ForecastWhy({ forecastId, targetDate }: ForecastWhyProps) {
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [disclaimer, setDisclaimer] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +90,7 @@ export function ForecastWhy({ forecastId, targetDate }: ForecastWhyProps) {
     if (!forecastId) {
       setContributions([]);
       setDisclaimer(null);
+      setSource(null);
       return;
     }
     setLoading(true);
@@ -94,6 +102,7 @@ export function ForecastWhy({ forecastId, targetDate }: ForecastWhyProps) {
       );
       setContributions(sorted.slice(0, 6));
       setDisclaimer(res.disclaimer ?? null);
+      setSource(res.attribution_source ?? null);
     } catch (err) {
       if (err instanceof ApiException) {
         setError(
@@ -105,6 +114,7 @@ export function ForecastWhy({ forecastId, targetDate }: ForecastWhyProps) {
         setError('You appear to be offline. Check your connection.');
       }
       setContributions([]);
+      setSource(null);
     } finally {
       setLoading(false);
     }
@@ -153,6 +163,14 @@ export function ForecastWhy({ forecastId, targetDate }: ForecastWhyProps) {
         />
       ) : (
         <>
+          {source === 'stub' ? (
+            <p
+              role="note"
+              className="mb-3 rounded-lg bg-amber-50 px-2.5 py-2 text-micro leading-relaxed text-amber-800">
+              These drivers are placeholders: no trained model is loaded for this workspace, so
+              nothing here is attributed to one.
+            </p>
+          ) : null}
           <ul className="flex flex-col gap-2">
             {contributions.map((item) => {
               const raised = item.impact >= 0;

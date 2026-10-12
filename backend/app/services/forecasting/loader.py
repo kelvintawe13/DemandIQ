@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.models.experiment import Experiment, ExperimentFold
 from app.models.forecast import ModelVersion
 from app.models.location import DemandObservation
-from app.services.feature_build import build_features, build_model_features
+from app.services.feature_build import FeatureVector, build_features, build_model_features
 from app.services.forecasting.bundle import bundle_holidays, get_bundle
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,13 @@ class DummyArtifact:
 
 @dataclass(frozen=True, slots=True)
 class PointResult:
-    """Output of :func:`predict_point`."""
+    """Output of :func:`predict_point`.
+
+    ``feature_vector`` is the vector the point was actually computed from. It
+    travels with the result so that the interval and the attribution describe
+    the same row as the point; rebuilding it downstream is how the three ended
+    up reading different feature sets (see :func:`build_serving_vector`).
+    """
 
     point: float
     fallback: bool
@@ -64,6 +70,7 @@ class PointResult:
     artifact: DummyArtifact
     history_days: int
     feature_set_version: str
+    feature_vector: FeatureVector
 
 
 def _date_or_none(value: object) -> datetime.date | None:
@@ -612,6 +619,35 @@ def _point_from_bundle(bundle: dict, features: dict) -> float | None:
     return float(round(max(0.0, point), 2))
 
 
+def build_serving_vector(
+    db: Session,
+    *,
+    location_id: uuid.UUID,
+    target_date: datetime.date,
+    as_of: datetime.datetime,
+) -> FeatureVector:
+    """The feature vector this forecast is served on — the only one to use.
+
+    With a serving bundle the booster needs the FULL training feature set *and*
+    the exact holiday calendar its training features assumed, so
+    ``build_model_features`` is used with the bundle's calendar. Without one the
+    stub point is derived from the legacy vector, so that is the honest choice.
+
+    Every consumer of "the features behind forecast X" — the interval, the
+    attribution, the router's explanation hydration — must come through here.
+    Calling a builder directly is what let the point be computed from the
+    model's 26 columns while the interval and explanation were built from a
+    different feature set (finding J in docs/RETRAIN_GUIDE.md): the same
+    forecast describing two different rows.
+    """
+    bundle = get_bundle()
+    holidays = bundle_holidays(bundle) if bundle is not None else None
+    build = build_model_features if bundle is not None else build_features
+    return build(
+        db, location_id=location_id, target_date=target_date, as_of=as_of, holidays=holidays
+    )
+
+
 def predict_point(
     db: Session,
     *,
@@ -653,14 +689,11 @@ def predict_point(
     model_version = get_production_model(db, workspace_id)
     feature_set_version = model_version.feature_set_version or "v1"
 
-    # Build features — also gives history_days for the fallback decision.
-    # When a serving bundle is configured, the model needs the FULL training
-    # feature set AND the exact holiday calendar its training features
-    # assumed; build_model_features is a superset of the stub vector.
+    # Build features — also gives history_days for the fallback decision. One
+    # builder per forecast: this exact vector is carried on the result so the
+    # interval and the attribution cannot end up describing a different row.
     bundle = get_bundle()
-    holidays = bundle_holidays(bundle) if bundle is not None else None
-    build = build_model_features if bundle is not None else build_features
-    fv = build(db, location_id=location_id, target_date=target_date, as_of=as_of, holidays=holidays)
+    fv = build_serving_vector(db, location_id=location_id, target_date=target_date, as_of=as_of)
     history_days = fv.history_days
 
     # Fallback if fewer than 7 days of history (was 30 — too strict, see
@@ -690,6 +723,7 @@ def predict_point(
             artifact=artifact,
             history_days=history_days,
             feature_set_version=feature_set_version,
+            feature_vector=fv,
         )
 
     # Real path — serve the exported LightGBM bundle when one is configured.
@@ -709,6 +743,7 @@ def predict_point(
                 artifact=artifact,
                 history_days=history_days,
                 feature_set_version=m["feature_set_version"],
+                feature_vector=fv,
             )
         # Bundle present but unusable (missing deps / feature mismatch):
         # fall through to the stub so the API never hard-fails.
@@ -749,4 +784,5 @@ def predict_point(
         artifact=artifact2,
         history_days=history_days,
         feature_set_version=feature_set_version,
+        feature_vector=fv,
     )

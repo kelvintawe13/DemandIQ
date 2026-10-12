@@ -18,7 +18,13 @@ from fastapi.testclient import TestClient
 
 from app.database import get_db
 from app.main import create_app
-from app.models.forecast import Forecast, ForecastExplanation, ModelVersion
+from app.models.forecast import (
+    ATTRIBUTION_BOOSTER,
+    ATTRIBUTION_STUB,
+    Forecast,
+    ForecastExplanation,
+    ModelVersion,
+)
 from app.models.location import DemandObservation
 from app.models.user import User, UserRole
 from app.routers import forecasts as router_mod
@@ -93,12 +99,18 @@ def _fake_db(forecast: Forecast, *, explanation_rows=None, for_model_version=Non
     return db
 
 
-def _explanation(forecast_id: uuid.UUID, feature: str, impact: float) -> ForecastExplanation:
+def _explanation(
+    forecast_id: uuid.UUID,
+    feature: str,
+    impact: float,
+    source: str = ATTRIBUTION_BOOSTER,
+) -> ForecastExplanation:
     return ForecastExplanation(
         forecast_id=forecast_id,
         feature_name=feature,
         feature_value="1",
         shap_impact=Decimal(str(impact)),
+        attribution_source=source,
     )
 
 
@@ -130,6 +142,9 @@ def test_explanation_summary_reports_real_drivers() -> None:
 
     assert body["attribution_type"] == "predictive"
     assert "not causal" in body["disclaimer"]
+    # Which path wrote the rows travels with them: the numbers alone cannot say
+    # whether a model produced them.
+    assert body["attribution_source"] == ATTRIBUTION_BOOSTER
     # Only model features count as drivers — the residual row does not.
     assert body["total_drivers"] == 3
     assert body["residual_visitors"] == 2.0
@@ -156,6 +171,28 @@ def test_explanation_summary_dominant_is_largest_magnitude() -> None:
     )
     assert "28-day demand volatility" in body["dominant_factor"]
     assert "-30.0" in body["dominant_factor"]
+
+
+def test_explanation_summary_reports_a_placeholder_attribution() -> None:
+    """A stub-written explanation says so, and a mixed set is not flattened."""
+    forecast = _forecast()
+    stub_rows = [
+        _explanation(forecast.id, "roll_mean_7", 4.0, source=ATTRIBUTION_STUB),
+        _explanation(forecast.id, "_residual", 1.0, source=ATTRIBUTION_STUB),
+    ]
+    body = forecast_explanation_summary(
+        forecast.id, db=_fake_db(forecast, explanation_rows=stub_rows), current_user=USER
+    )
+    assert body["attribution_source"] == ATTRIBUTION_STUB
+
+    mixed_rows = [
+        _explanation(forecast.id, "roll_mean_7", 4.0, source=ATTRIBUTION_STUB),
+        _explanation(forecast.id, "lag_1", 2.0, source=ATTRIBUTION_BOOSTER),
+    ]
+    body = forecast_explanation_summary(
+        forecast.id, db=_fake_db(forecast, explanation_rows=mixed_rows), current_user=USER
+    )
+    assert body["attribution_source"] == "mixed"
 
 
 def test_explanation_summary_is_workspace_scoped() -> None:
@@ -367,6 +404,53 @@ def test_policy_simulation_runs_the_real_service_unmocked() -> None:
     # Nothing measurable beats the point rule on unmet demand, and the
     # unmeasurable average rule is not allowed to claim the win.
     assert body["lowest_unmet_demand"] == {"policy": "point_forecast", "value": 0.0}
+
+
+# ------------------------------------------------- the vector behind a row
+
+
+def test_serving_vector_comes_from_the_bundle_when_one_is_served(monkeypatch) -> None:
+    """One builder decides, and it is the model's when a bundle is served.
+
+    The point, the interval and the attribution must all read the vector this
+    function returns. Choosing the legacy builder here while the booster was
+    served the 26 trained columns is finding J: one forecast described by two
+    different rows.
+    """
+    from app.services.forecasting import loader as loader_mod
+
+    calls: list[tuple[str, object]] = []
+    holidays = frozenset({datetime.date(2026, 7, 4)})
+
+    def _builder(name: str):
+        def _build(db, **kw):  # type: ignore[no-untyped-def]
+            calls.append((name, kw.get("holidays")))
+            return mark
+
+        return _build
+
+    mark = MagicMock(name="feature_vector")
+    monkeypatch.setattr(loader_mod, "build_model_features", _builder("model"))
+    monkeypatch.setattr(loader_mod, "build_features", _builder("legacy"))
+    monkeypatch.setattr(loader_mod, "bundle_holidays", lambda bundle: holidays)
+
+    kwargs = {
+        "db": MagicMock(),
+        "location_id": LOC_ID,
+        "target_date": datetime.date(2026, 10, 11),
+        "as_of": datetime.datetime(2026, 10, 10, 3, 0, tzinfo=datetime.UTC),
+    }
+
+    monkeypatch.setattr(loader_mod, "get_bundle", lambda: {"model": {}})
+    assert loader_mod.build_serving_vector(**kwargs) is mark
+    assert calls == [("model", holidays)], "the served model's own calendar must be used"
+
+    # No bundle: the stub point is derived from the legacy vector, so that is
+    # the honest vector for the interval and the explanation too.
+    calls.clear()
+    monkeypatch.setattr(loader_mod, "get_bundle", lambda: None)
+    assert loader_mod.build_serving_vector(**kwargs) is mark
+    assert calls == [("legacy", None)]
 
 
 # ------------------------------------------------------- served over HTTP

@@ -78,23 +78,23 @@ def load_rows(csv_path: Path) -> list[dict]:
     reader = csv.DictReader(raw.splitlines(), delimiter=";")
     rows = []
     for row in reader:
-            establish = unicodedata.normalize("NFC", (row.get("City / kitchen") or "")).strip()
-            ts = (row.get("Timestamp") or "").strip()
-            waste = (row.get("Waste weight sum") or "").strip()
-            whole_day = (row.get("ordered portions, Whole day") or "").strip()
-            if not establish and not waste:
-                continue  # blank padding row
-            rows.append(
-                {
-                    "establishment_code": establish or "unknown",
-                    "country": (establish.split(" / ")[0].strip() if " / " in establish else None),
-                    "observed_on": parse_date_ddmmyyyy(ts),
-                    "waste_kg": parse_float_comma(waste),
-                    "ordered_portions": parse_int(whole_day),
-                    "source_dataset": "urban-waste-ftd",
-                    "licence": "CC BY 4.0",
-                }
-            )
+        establish = unicodedata.normalize("NFC", (row.get("City / kitchen") or "")).strip()
+        ts = (row.get("Timestamp") or "").strip()
+        waste = (row.get("Waste weight sum") or "").strip()
+        whole_day = (row.get("ordered portions, Whole day") or "").strip()
+        if not establish and not waste:
+            continue  # blank padding row
+        rows.append(
+            {
+                "establishment_code": establish or "unknown",
+                "country": (establish.split(" / ")[0].strip() if " / " in establish else None),
+                "observed_on": parse_date_ddmmyyyy(ts),
+                "waste_kg": parse_float_comma(waste),
+                "ordered_portions": parse_int(whole_day),
+                "source_dataset": "urban-waste-ftd",
+                "licence": "CC BY 4.0",
+            }
+        )
     return rows
 
 
@@ -122,16 +122,14 @@ def main() -> int:
         print("No usable rows found in", args.csv)
         return 1
 
-    insert_sql = sa.text(
-        """
+    insert_sql = sa.text("""
         INSERT INTO waste_observations
             (establishment_code, country, observed_on, waste_kg, ordered_portions,
              source_dataset, licence)
         VALUES
             (:establishment_code, :country, :observed_on, :waste_kg, :ordered_portions,
              :source_dataset, :licence)
-        """
-    )
+        """)
     delete_sql = sa.text("DELETE FROM waste_observations WHERE source_dataset = 'urban-waste-ftd'")
 
     with engine.begin() as conn:

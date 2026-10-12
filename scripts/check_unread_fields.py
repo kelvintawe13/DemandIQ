@@ -55,6 +55,45 @@ REVIEWED_UNREAD: dict[str, str] = {
     # same socket. Rendering it in the console would be wrong rather than
     # merely redundant — the console is not the audience for a device feed.
     "stream.py:topic": "read by the device agent over the WebSocket, not by a screen",
+    # Nested inside the waste summary's ``descriptive_stats``, which
+    # ``DatasetsAdmin.tsx`` does read as a whole (``waste?.descriptive_stats``)
+    # — the panel renders the headline figures and the per-establishment spread
+    # (``establishment_variation``) from that object, not this monthly series.
+    # The field is the waste-seasonality evidence (Section 3.21: March waste ran
+    # about twice November's), which is why the endpoint computes it; the panel
+    # is not its audience. This checker matches key literals against the
+    # frontend, so a member of an object a screen reads whole looks unread.
+    "datasets.py:monthly_pattern": "member of descriptive_stats, which the datasets panel reads whole",
+    # The three forecast-scoped endpoints — /forecasts/{id}/explanation/summary,
+    # /policy/simulation and /drift/monitoring — are API contract, reimplemented
+    # rather than deleted (decided deliberately; they are documented in
+    # API_ENDPOINTS.md). No screen consumes them yet: the forecast screen renders
+    # the per-feature attribution (ForecastWhy.tsx), not the plain-language
+    # summary, the per-day policy trade-off or the drift PSI. So every key below
+    # is unrendered by construction rather than forgotten, and each belongs to
+    # one endpoint, noted here so the reason stays checkable. Wire a screen and
+    # the checker will fail on the stale entry until it is deleted.
+    "forecasts.py:dominant_factor": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:negative_factors": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:positive_factors": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:residual_visitors": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:total_drivers": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:total_impact_visitors": "explanation/summary — no screen consumes the endpoint",
+    "forecasts.py:lowest_realised_surplus": "policy/simulation — no screen consumes the endpoint",
+    "forecasts.py:lowest_unmet_demand": "policy/simulation — no screen consumes the endpoint",
+    "forecasts.py:baseline_count": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:baseline_days": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:baseline_from": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:baseline_kind": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:baseline_to": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:current_psi": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:drift_reason": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:drift_status": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:model_training_window": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:psi": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:psi_threshold": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:recent_count": "drift/monitoring — no screen consumes the endpoint",
+    "forecasts.py:recent_days": "drift/monitoring — no screen consumes the endpoint",
 }
 
 
