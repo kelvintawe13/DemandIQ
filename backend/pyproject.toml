@@ -69,6 +69,8 @@ markers = [
     "integration: needs a migrated Postgres — run scripts/ingest_e2e.sh",
 ]
 
+asyncio_mode = "auto"
+
 [tool.black]
 line-length = 100
 target-version = ['py311']
