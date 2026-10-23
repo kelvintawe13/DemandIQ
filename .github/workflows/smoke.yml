@@ -1,0 +1,89 @@
+# DemandIQ — post-deploy smoke check.
+#
+# Runs scripts/smoke_deployed.sh against the live web service: API reachable,
+# schema migrated, trained bundle actually serving, SPA and docs served.
+#
+# When it runs:
+#   * after a successful CI run on `main` (Railway deploys the same push, and the
+#     script retries for up to WAIT_SECONDS while the new release rolls out);
+#   * manually, with the URL as an input, for a first check or a rollback.
+#
+# Configuration: set the repository variable `SMOKE_BASE_URL` to the web
+# service's public URL, e.g. https://demandiq-web.up.railway.app. Without it the
+# job skips with a notice instead of failing every push — a repository that has
+# not been deployed yet should not look broken.
+#
+# What this does NOT prove: that *this* commit is the live one. Nothing in the
+# API reports the deployed git SHA (Railway injects RAILWAY_GIT_COMMIT_SHA, but
+# the app does not surface it), so a healthy smoke against a deployment that has
+# not finished rolling out still passes. It is a serving-correctness gate, not a
+# release-identity check.
+
+name: Deployed smoke check
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Public URL of the deployed web service (overrides SMOKE_BASE_URL)"
+        required: false
+        type: string
+
+# One smoke at a time: a second push should not have two checks racing for the
+# same deployment and reporting each other's rollout states.
+concurrency:
+  group: smoke-deployed
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke the live deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # workflow_run fires for failed CI runs too; a red build must not be
+    # followed by a green deployment check.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      # On workflow_run this checks out the default branch — the same code
+      # Railway just deployed — so the script that runs is the shipped one.
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Resolve the deployment URL
+        id: target
+        env:
+          INPUT_URL: ${{ inputs.base_url }}
+          CONFIGURED_URL: ${{ vars.SMOKE_BASE_URL }}
+        run: |
+          url="${INPUT_URL:-$CONFIGURED_URL}"
+          if [ -z "$url" ]; then
+            {
+              echo "### Deployed smoke check skipped"
+              echo
+              echo "Set the repository variable \`SMOKE_BASE_URL\` to the web service URL"
+              echo "(e.g. \`https://demandiq-web.up.railway.app\`) to enable this check."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::No SMOKE_BASE_URL configured — skipping the deployed smoke check."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "url=${url%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the rollout, then check it
+        if: steps.target.outputs.skip != 'true'
+        env:
+          BASE_URL: ${{ steps.target.outputs.url }}
+          # Bounded retry inside the script, not a sleep: the health endpoint is
+          # polled until it answers 200 or the budget runs out.
+          WAIT_SECONDS: ${{ vars.SMOKE_WAIT_SECONDS || '600' }}
+        run: bash scripts/smoke_deployed.sh
