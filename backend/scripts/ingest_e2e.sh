@@ -55,7 +55,11 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
 fi
 rm -f "$PGDATA/postmaster.pid"
 if ! "$PG_BIN/pg_isready" -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
-  "$PG_BIN/pg_ctl" -D "$PGDATA" -l /tmp/diq-ingest-e2e-pg.log -o "-p $PG_PORT" start -w >/dev/null
+  # See the note in auth_e2e.sh: Debian/Ubuntu builds default the unix socket to
+  # /var/run/postgresql, owned by the postgres user, so a cluster started by an
+  # ordinary account cannot create its lock file there. Every client connects
+  # over TCP (-h localhost), so the socket just needs a writable directory.
+  "$PG_BIN/pg_ctl" -D "$PGDATA" -l /tmp/diq-ingest-e2e-pg.log -o "-p $PG_PORT -k /tmp" start -w >/dev/null
 fi
 "$PG_BIN/psql" -h localhost -p "$PG_PORT" -U postgres -d postgres \
   -c "DROP DATABASE IF EXISTS $DBNAME" -c "CREATE DATABASE $DBNAME" >/dev/null

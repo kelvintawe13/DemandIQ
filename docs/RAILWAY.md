@@ -260,6 +260,29 @@ Then, in the browser:
    with per-row confidence; nothing is written until you commit.
 4. **Admin → Model Registry / Experiments** — the trained run's metadata.
 
+### The same checks, automated
+
+`scripts/smoke_deployed.sh` runs those probes in one pass and fails on the
+`serving.mode` value rather than printing it:
+
+```bash
+scripts/smoke_deployed.sh https://<web>.up.railway.app
+```
+
+It waits for the rollout (default 600 s, `WAIT_SECONDS` to change), then asserts the API
+answers, `database: ok`, `serving.mode: trained`, and that `/healthz`, `/app/` and
+`/docs` are served through the proxy.
+
+To run it after every deploy, set the **repository variable** `SMOKE_BASE_URL` to the web
+service URL (**Settings → Secrets and variables → Actions → Variables**).
+`.github/workflows/smoke.yml` then runs it whenever `CI` succeeds on `main`, and on demand
+via *Actions → Deployed smoke check → Run workflow*. Without the variable the job skips
+with a notice instead of failing every push.
+
+It verifies that the deployment is serving correctly, not that the newest commit is the
+live one — the API does not expose the deployed git SHA, so a smoke that runs while
+yesterday's release is still serving will pass.
+
 ---
 
 ## 7. Troubleshooting

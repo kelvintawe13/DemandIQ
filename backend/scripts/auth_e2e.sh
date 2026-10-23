@@ -81,7 +81,13 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
 fi
 rm -f "$PGDATA/postmaster.pid"
 if ! "$PG_BIN/pg_isready" -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
-  "$PG_BIN/pg_ctl" -D "$PGDATA" -l /tmp/diq-auth-e2e-pg.log -o "-p $PG_PORT" start -w >/dev/null
+  # `-k /tmp` is not cosmetic. Debian/Ubuntu builds compile in
+  # unix_socket_directories=/var/run/postgresql, which belongs to the postgres
+  # user: a disposable cluster started by an ordinary account (a developer, or
+  # the CI runner) dies at startup with "could not create lock file …
+  # Permission denied". Every client here connects over TCP (-h localhost), so
+  # the socket only has to live somewhere the caller can write.
+  "$PG_BIN/pg_ctl" -D "$PGDATA" -l /tmp/diq-auth-e2e-pg.log -o "-p $PG_PORT -k /tmp" start -w >/dev/null
 fi
 "$PG_BIN/psql" -h localhost -p "$PG_PORT" -U postgres -d postgres \
   -c "DROP DATABASE IF EXISTS $DBNAME" -c "CREATE DATABASE $DBNAME" >/dev/null
