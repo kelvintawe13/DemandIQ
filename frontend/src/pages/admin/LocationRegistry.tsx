@@ -383,7 +383,7 @@ export function LocationRegistry({ onNavigate }: { onNavigate?: (id: string) => 
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Panel
           title="Locations"
           icon={MapPinIcon}

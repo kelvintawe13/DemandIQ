@@ -191,9 +191,18 @@ Nine steps, defined once so no screen invents a size:
 
 ### 4.3 Space, radius, elevation
 
-- Spacing: Tailwind default 4px scale. Card padding is `p-4` desktop, `p-3` mobile.
-- Radius: `rounded-lg` (8px) for controls, `rounded-2xl` (16px) for the mobile
-  sheet and modal panels, `rounded-full` for badges only.
+- Spacing: Tailwind default 4px scale, tuned for density. Card padding is `p-3`
+  phone / `p-3.5` desktop (`Panel`, and the hand-rolled cards that repeat its
+  chrome); KPI tiles are one step tighter at `p-2` / `p-2.5`.
+- Page gutters match the header: `px-2.5` / `sm:px-3` / `lg:px-4` in `AppShell`
+  and `PageHeader` (they must stay equal or the card edges stop lining up), and
+  the two-column content grids use `gap-2.5`.
+- Data density: table cells are `py-2.5` on a phone and `py-2` from `sm`;
+  `RecordList` rows `py-2` / `sm:py-1.5`. Same pairing as the panel-header
+  actions — keep the phone target, tighten the desktop row.
+- Radius: `rounded-xl` (12px) for cards, `rounded-lg` (8px) for controls and KPI
+  tiles, `rounded-2xl` (16px) for the mobile sheet and modal panels,
+  `rounded-full` for badges only.
 - Elevation: two tokens, both deliberately soft —
   `shadow-lift` (`0 1px 0 …, 0 12px 32px -12px …`) for cards,
   `shadow-lift-lg` for modals and the assistant drawer. No third level.

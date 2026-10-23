@@ -9,8 +9,8 @@ export function AgentLauncher() {
   const { open, setOpen, unread, clearUnread } = useAgent();
   // State-aware, because `aria-expanded` is already on the button: a control
   // that reports itself expanded while being named "Open" contradicts itself.
-  // It matters more now that the rail is open by default on wide screens, where
-  // this button's job is to collapse it.
+  // The panel is closed on load, so this mostly reads "Open" — but it becomes
+  // the way to collapse the rail once open, and the name must follow.
   const label = open ? 'Close DemandIQ Assistant (Ctrl+J)' : 'Open DemandIQ Assistant (Ctrl+J)';
 
   return (

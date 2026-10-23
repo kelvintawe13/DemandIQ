@@ -769,7 +769,7 @@ export function ManualFormTab() {
       {/* Past fills: what is already stored for this location (full CRUD) */}
       <section
         aria-labelledby="past-fills-heading"
-        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5 overflow-hidden"
+        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 overflow-hidden"
       >
         <div className="flex items-center justify-between gap-3">
           <h2 id="past-fills-heading" className="flex items-center gap-2 text-h5 font-bold tracking-tight text-slate-900">
@@ -909,7 +909,7 @@ export function ManualFormTab() {
 
       <section
         aria-labelledby="quick-summary-heading"
-        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5 overflow-hidden"
+        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5 overflow-hidden"
       >
         <h2 id="quick-summary-heading" className="flex items-center gap-2.5 text-h3 font-bold tracking-tight text-slate-900">
           <BarChart3Icon className="h-5 w-5 text-brand-600" strokeWidth={2} />

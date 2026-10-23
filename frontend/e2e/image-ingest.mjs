@@ -163,8 +163,10 @@ async function discardUpload(jobId, token) {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
-  // A 404 means it is already gone, which is the desired end state.
-  if (response.status !== 204 && response.status !== 404) {
+  // 200 carries the removal report (`{deleted, filename, removed_rows}`); 204 is
+  // what older builds answered, and a 404 means it is already gone — the
+  // desired end state either way.
+  if (![200, 204, 404].includes(response.status)) {
     throw new Error(`could not discard staged upload ${jobId}: HTTP ${response.status}`);
   }
 }

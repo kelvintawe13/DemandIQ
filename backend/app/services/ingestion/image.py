@@ -88,6 +88,11 @@ _UPSCALE_BELOW_EDGE = 800
 _UPSCALE_TO_EDGE = 1600
 _MAX_UPSCALE = 3.0
 
+# Deskew search: a few degrees either way, measured on a small probe so the
+# extra work does not double the OCR latency.
+_DESKEW_PROBE_WIDTH = 240
+_DESKEW_MAX_DEGREES = 6.0
+
 
 class ImageValidationError(ValueError):
     """Raised when an upload is not a decodable image within the size budget."""
@@ -128,6 +133,26 @@ def _sniff_image_format(content: bytes) -> str | None:
         if brand in (b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1"):
             return "heic"
     return None
+
+
+_MIME_BY_FORMAT = {
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "gif": "image/gif",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+    "webp": "image/webp",
+}
+
+
+def image_mime_type(detected_format: str | None) -> str:
+    """Content type for a photo stored on an upload, from its sniffed format.
+
+    Deliberately not the client's Content-Type: the type served back to the
+    browser is decided by the bytes that were accepted, so a mislabelled upload
+    cannot come back as something else.
+    """
+    return _MIME_BY_FORMAT.get((detected_format or "").lower(), "application/octet-stream")
 
 
 def validate_image_upload(content: bytes, filename: str | None = None) -> ImageInfo:
@@ -229,10 +254,82 @@ def _prepare_image(content: bytes):  # type: ignore[no-untyped-def]
             )
 
     gray = ImageOps.grayscale(image)
-    gray = ImageOps.autocontrast(gray, cutoff=1)
+    # Lighting first: a shadow crossing the page reads as a tilt to the deskew
+    # search (it changes how dark pixels fall across rows), so flattening it
+    # before measuring the angle is what keeps a well-lit page unrotated.
+    gray = _flatten_illumination(gray)
+    gray = _deskew(gray)
     # A small quiet border keeps text away from the crop edge, where Tesseract's
     # layout analysis otherwise drops the first/last line of a tight photo.
     return ImageOps.expand(gray, border=16, fill=255)
+
+
+def _row_projection_score(image):  # type: ignore[no-untyped-def]
+    """How strongly the ink lines up in horizontal bands (higher is straighter)."""
+    from PIL import ImageOps
+
+    raw = ImageOps.invert(image).tobytes()
+    width, height = image.size
+    rows = [sum(raw[y * width : (y + 1) * width]) for y in range(height)]
+    mean = sum(rows) / max(1, height)
+    return sum((row - mean) ** 2 for row in rows)
+
+
+def _deskew(gray):  # type: ignore[no-untyped-def]
+    """Straighten a page photographed a few degrees off square.
+
+    Tesseract's line finding wants a roughly horizontal baseline: a 4.5-degree
+    tilt was enough to lose a line and misread another. The angle is chosen on a
+    small probe by maximising the row projection (a straight page puts every
+    line's ink on one band of rows), then applied once to the full image. Only
+    small angles are considered — a 90-degree turn is a sideways photo, which
+    EXIF and OSD handle differently, and rotating on a guess there is worse than
+    leaving it alone.
+    """
+    from PIL import Image
+
+    scale = _DESKEW_PROBE_WIDTH / max(gray.size)
+    probe = (
+        gray
+        if scale >= 1
+        else gray.resize((max(1, int(gray.width * scale)), max(1, int(gray.height * scale))))
+    )
+    zero_score = _row_projection_score(probe)
+    best_angle, best_score = 0.0, zero_score
+    angle = -_DESKEW_MAX_DEGREES
+    while angle <= _DESKEW_MAX_DEGREES:
+        rotated = probe.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
+        score = _row_projection_score(rotated)
+        if score > best_score:
+            best_angle, best_score = angle, score
+        angle += 1.0
+    # A page that is already square must not be rotated on noise: only a clear
+    # improvement in line alignment is worth blurring the photo to achieve.
+    if best_angle == 0.0 or best_score < zero_score * 1.01:
+        return gray
+    logger.info("deskewing photo by %.0f degrees", best_angle)
+    return gray.rotate(best_angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
+
+
+def _flatten_illumination(gray):  # type: ignore[no-untyped-def]
+    """Remove shadows and speckle, then stretch contrast.
+
+    A phone photo of a notebook is rarely evenly lit: a shadow across the page
+    turned half of a test page's lines into smudges Tesseract read none of.
+    Subtracting a heavily blurred copy of the page (its lighting) leaves the
+    ink. Neither invents strokes, and no thresholding is applied — binarising
+    handwriting erases the very strokes that distinguish a 7 from a 1.
+
+    A median filter was tried here and removed: it cleaned speckle the
+    flattening already handled, and on hand-written lines it smoothed strokes
+    into different digits (a measured 98 read back as 9, a 134 as 434).
+    """
+    from PIL import ImageChops, ImageFilter, ImageOps
+
+    radius = max(12, min(gray.size) // 20)
+    background = gray.filter(ImageFilter.GaussianBlur(radius))
+    flattened = ImageChops.subtract(gray, background, scale=1.0, offset=255)
+    return ImageOps.autocontrast(flattened, cutoff=1)
 
 
 def _safe_date(year: str | int, month: str | int, day: str | int) -> datetime.date | None:

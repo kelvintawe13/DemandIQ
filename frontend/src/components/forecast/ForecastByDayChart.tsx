@@ -55,7 +55,7 @@ export function ForecastByDayChart({ data }: { data: ForecastDayPoint[] }) {
   }));
 
   return (
-    <div className="h-[220px] w-full overflow-hidden">
+    <div className="h-[185px] w-full overflow-hidden">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={series} margin={{ top: 12, right: 8, bottom: 22, left: 12 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />

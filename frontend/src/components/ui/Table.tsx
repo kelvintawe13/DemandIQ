@@ -121,7 +121,7 @@ export function TD({
   className?: string;
   scope?: 'row';
 }) {
-  const cellClass = `py-2.5 pr-3 align-middle text-meta text-slate-700 ${className}`;
+  const cellClass = `py-2.5 pr-3 sm:py-2 align-middle text-meta text-slate-700 ${className}`;
   if (scope === 'row') {
     return (
       <th scope="row" className={`text-left font-normal ${cellClass}`}>
@@ -334,7 +334,7 @@ export function ResponsiveTable<T>({
                 // `text-left font-normal` matter only for the row-header cell: the
                 // browser centres and bolds a `th` by default, which would make the
                 // primary column look different from before.
-                const cellClass = `py-2.5 pr-3 text-left align-middle text-meta font-normal text-slate-700 ${column.cellClassName ?? ''}`;
+                const cellClass = `py-2.5 pr-3 sm:py-2 text-left align-middle text-meta font-normal text-slate-700 ${column.cellClassName ?? ''}`;
                 /* The primary column names its row, so it is a `th[scope="row"]`.
                    A table with only column headers gives a screen reader a row of
                    cells with nothing to attach them to, and the first column —

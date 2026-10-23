@@ -47,12 +47,14 @@ x-api-build: &api-build
     context: ./backend
     dockerfile: Dockerfile
     args:
-      # Real LightGBM inference needs the `model` extra; the bundle itself is
-      # mounted at /model by `*api-common` below and found by the loader's
-      # default candidates. Without the extra the image has no lightgbm/joblib,
-      # so the forecasting service falls back to stub forecasts — a legitimate
-      # way to run the UI but not to serve real numbers. See DOCKER.md.
-      INSTALL_EXTRAS: ${BACKEND_EXTRAS:-}
+      # OCR is the DEFAULT extra, not an opt-in one. Without it the image has no
+      # OCR engine at all, so every handwritten/printed photo stages a job with
+      # zero rows — the ingestion feature silently does nothing on a stock
+      # `make docker-up`. Enable real LightGBM serving by adding `model`:
+      #   BACKEND_EXTRAS="ocr model"
+      # The bundle itself is mounted at /model by `*api-common` below and found
+      # by the loader's default candidates. See DOCKER.md.
+      INSTALL_EXTRAS: ${BACKEND_EXTRAS:-ocr}
 
 x-api-env: &api-env
   DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-demandiq}:${POSTGRES_PASSWORD:-demandiq}@postgres:5432/${POSTGRES_DB:-demandiq}
@@ -219,6 +221,11 @@ services:
         # matching the private halves in backend/.env.
         VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+        # Stamped in the footer so a browser can say which build it is showing.
+        # Compose interpolates the environment but cannot run git, so the value
+        # comes from `make docker-build` / `make docker-up` (or the caller's env).
+        # Empty falls back to a build timestamp inside vite.config.ts.
+        GIT_SHA: ${GIT_SHA:-}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

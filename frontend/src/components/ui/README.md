@@ -60,12 +60,13 @@ segmented control"). These keep their own markup on purpose:
   track-and-knob — `Toggle` is for on/off settings.
 - `agent/AgentPanel` renders its own equal-width in-panel view tabs and an
   inline suggestion `listbox`; `TabBar` and `SelectMenu` express neither shape.
-- `agent/AgentPanel` docks as a third column from **1180px** (`min-[1180px]:`,
-  mirroring `RAIL_MIN_WIDTH` in `contexts/AgentContext`) and is open on load
-  there — iPad landscape and laptops get the rail without the page being
-  covered. Below 1180px it is a drawer that starts closed. It spends an
-  assistant session only on a gesture, so a rail that is open by default costs
-  nothing on page load. The sidebar keeps its full width in either state;
+- `agent/AgentPanel` is **closed on load at every width**, and opens only on a
+  gesture (the header launcher, Ctrl+J, a suggestion). Once open it docks as a
+  third column from **1180px** (`min-[1180px]:`, mirroring `RAIL_MIN_WIDTH` in
+  `contexts/AgentContext`), so iPad landscape and laptops get the rail without
+  the page being covered; below 1180px it is a drawer. Closed means nothing is
+  rendered and the content keeps its full width, and it spends an assistant
+  session only on a gesture. The sidebar keeps its full width in either state;
   collapsing it stays the user's call.
 - Dashed-border blocks (`Sources`, `Reports`, `Settings`, `UploadImagePanel`,
   `ExcelCsvTab`, …) are drop zones, promos and previews, not empty states. Real

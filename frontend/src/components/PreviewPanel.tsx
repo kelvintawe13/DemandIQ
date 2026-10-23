@@ -272,7 +272,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   return (
     <section
       aria-labelledby="preview-heading"
-      className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+      className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5"
     >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <h2 id="preview-heading" className="text-h3 font-bold tracking-tight text-brand-700">

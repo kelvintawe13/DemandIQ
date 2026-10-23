@@ -108,7 +108,7 @@ export function AddLocation({ onNavigate }: { onNavigate?: (id: string) => void 
         <p className="text-fine text-slate-500">Nothing is saved until you submit this form.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <Panel
           title="Site details"
           icon={MapPinIcon}

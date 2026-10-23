@@ -45,6 +45,18 @@ export class ApiException extends Error {
 // token once, replays the original request, and notifies the session layer.
 // Single-flight: concurrent 401s await the same in-flight refresh.
 
+/**
+ * Endpoints where a 401 is the expected answer to bad input — a wrong password,
+ * a revoked refresh token. Tearing the session down here would turn a typo on
+ * the sign-in screen into a redirect loop.
+ */
+const UNAUTHENTICATED_BY_DESIGN = [
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/refresh',
+  '/api/v1/auth/logout',
+];
+
 let refreshInFlight: Promise<boolean> | null = null;
 let on401Handler: (() => void) | null = null;
 
@@ -137,17 +149,19 @@ async function request<T>(path: string, init: RequestInit & { query?: Record<str
       res.status === 401 &&
       !isRetry &&
       getAuthHeader().Authorization &&
-      getRefreshToken() &&
-      !path.startsWith('/api/v1/auth/login') &&
-      !path.startsWith('/api/v1/auth/register') &&
-      !path.startsWith('/api/v1/auth/refresh') &&
-      !path.startsWith('/api/v1/auth/logout')
+      !UNAUTHENTICATED_BY_DESIGN.some((p) => path.startsWith(p))
     ) {
-      if (await refreshAccessToken()) {
+      // The refresh credential is OPTIONAL. It used to gate this whole block,
+      // so a 401 with no persisted refresh token fell through silently: the
+      // dead token stayed in localStorage, the shell stayed mounted, and every
+      // panel rendered its own "Sign in required" error — a console with no
+      // control on it that could get back to sign-in. With no refresh token the
+      // session is already past saving, so it goes straight to teardown.
+      if (getRefreshToken() && (await refreshAccessToken())) {
         return request<T>(path, init, true);
       }
-      // Refresh failed — the session is unrecoverable. Clear credentials,
-      // notify the session layer, and raise the expiry UX (toast + redirect).
+      // Unrecoverable — clear credentials, notify the session layer, and raise
+      // the expiry UX (toast + redirect to sign-in with a notice).
       setToken(null);
       on401Handler?.();
       notifySessionExpired();
@@ -156,6 +170,37 @@ async function request<T>(path: string, init: RequestInit & { query?: Record<str
     throw new ApiException(res.status, err);
   }
   return data as T;
+}
+
+async function fetchBlobRequest(path: string, isRetry = false): Promise<Blob> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { Accept: 'image/*', ...getAuthHeader() },
+    signal:
+      typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+        ? AbortSignal.timeout(20_000)
+        : undefined,
+  });
+  if (!res.ok) {
+    // Same one-shot refresh as `request`, for the same reason: an expired access
+    // token must not make a stored photo look deleted.
+    if (res.status === 401 && !isRetry && getAuthHeader().Authorization) {
+      if (getRefreshToken() && (await refreshAccessToken())) return fetchBlobRequest(path, true);
+      setToken(null);
+      on401Handler?.();
+      notifySessionExpired();
+    }
+    // The binary endpoint answers errors in the same JSON envelope as the rest
+    // of the API, so the message survives instead of becoming a Blob of JSON.
+    let message = res.statusText || 'Request failed';
+    let code = `http_${res.status}`;
+    try {
+      const body = JSON.parse(await res.text());
+      if (body?.error?.message) message = body.error.message;
+      if (body?.error?.code) code = body.error.code;
+    } catch {}
+    throw new ApiException(res.status, { code, message, reference: res.headers.get('x-request-id') });
+  }
+  return res.blob();
 }
 
 export const api = {
@@ -168,6 +213,8 @@ export const api = {
   delete: <T>(path: string, init?: RequestInit) => request<T>(path, { method: "DELETE", ...init }),
   put: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined, ...init }),
+  /** Binary GET (stored photos and other media). JSON parsing would mangle it. */
+  blob: (path: string) => fetchBlobRequest(path),
 };
 
 // Convenience typed helpers for common envelopes

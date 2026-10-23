@@ -57,9 +57,23 @@ COPY frontend ./frontend
 ARG VITE_API_URL=""
 ARG VITE_TURNSTILE_SITE_KEY=""
 ARG VITE_GOOGLE_CLIENT_ID=""
+
+# The commit this bundle came from, stamped in the footer (`src/lib/build.ts`).
+#
+# There is no `.git` in the build context, so vite.config.ts cannot look it up
+# from inside the image. `GIT_SHA` is supplied by `make docker-build` (compose
+# cannot run git itself); `RAILWAY_GIT_COMMIT_SHA` is a Railway-provided
+# variable the platform passes as a build arg, so the deployed footer names the
+# commit with nothing to configure. Both may be empty: the stamp then falls back
+# to a build timestamp, which still tells two images apart.
+ARG GIT_SHA=""
+ARG RAILWAY_GIT_COMMIT_SHA=""
+
 ENV VITE_API_URL=${VITE_API_URL} \
     VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY} \
-    VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+    VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID} \
+    GIT_SHA=${GIT_SHA} \
+    RAILWAY_GIT_COMMIT_SHA=${RAILWAY_GIT_COMMIT_SHA}
 
 # vite.config.ts pins `base` to '/app/' for production builds, so the bundle
 # expects to be served under /app/. The nginx config serves it there, and the

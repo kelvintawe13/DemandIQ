@@ -265,7 +265,7 @@ export function Connectors(){
   if(loading) return <LoadingState label="Loading connectors" />;
   if(error) return <EmptyState variant={error.variant} title={error.title} description={error.desc} action={{label:'Retry',onClick:()=>void fetchAll()}} size="md" />;
 
-  return <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+  return <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-3">
         <Panel title="Channels" description="Every way demand reaches DemandIQ, all turned into one daily demand figure." action={<button type="button" onClick={()=>setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-2.5 sm:py-1.5 text-caption font-semibold text-white transition-colors duration-150 ease-out hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"><PlugZapIcon className="h-3.5 w-3.5" strokeWidth={2} />Add channel</button>}>
           <div className="mb-3 flex gap-1 overflow-x-auto rounded-lg border border-slate-200 p-1">

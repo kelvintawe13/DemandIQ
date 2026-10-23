@@ -45,7 +45,7 @@ export function DemandTrendChart({ data, ticks, showPrevious = true, height, cla
   const brand700 = getComputedStyle(document.documentElement).getPropertyValue('--brand-700').trim() || '#334155';
   
   return (
-    <div className={className ?? (height ? 'w-full' : 'h-[220px] w-full sm:h-[240px]')} style={height ? { height } : undefined}>
+    <div className={className ?? (height ? 'w-full' : 'h-[180px] w-full sm:h-[200px]')} style={height ? { height } : undefined}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={chartData}

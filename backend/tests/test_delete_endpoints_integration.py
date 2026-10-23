@@ -286,9 +286,69 @@ def test_delete_uncommitted_upload_removes_the_row() -> None:
     assert created.status_code == 201, created.text
     upload_id = uuid.UUID(created.json()["upload_id"])
 
-    assert client.delete(f"/api/v1/ingest/uploads/{upload_id}").status_code == 204
+    deleted = client.delete(f"/api/v1/ingest/uploads/{upload_id}")
+    assert deleted.status_code == 200, deleted.text
+    # Nothing had been committed, so nothing was taken out of history.
+    assert deleted.json()["removed_rows"] == 0
     assert _row(IngestUpload, upload_id) is None
     assert client.delete(f"/api/v1/ingest/uploads/{upload_id}").status_code == 404
+
+
+def test_deleting_a_committed_import_removes_the_rows_it_wrote() -> None:
+    """The undo path, against a real database.
+
+    The FK from ``demand_observations.upload_id`` is what used to make a
+    committed import undeletable, and the ordering that satisfies it (rows
+    first, then the upload) is exactly the kind of thing a mocked session cannot
+    prove. The other import's rows must be untouched.
+    """
+    seed = Seeded("Undo")
+    client = _client(seed.owner_id)
+
+    def import_one(day: str, qty: int) -> uuid.UUID:
+        created = client.post(
+            "/api/v1/ingest/file",
+            files={
+                "file": (
+                    f"probe-{day}.csv",
+                    io.BytesIO(f"date,demand_qty\n{day},{qty}\n".encode()),
+                    "text/csv",
+                )
+            },
+        )
+        assert created.status_code == 201, created.text
+        upload_id = uuid.UUID(created.json()["upload_id"])
+        mapped = client.post(
+            f"/api/v1/ingest/file/{upload_id}/mapping",
+            json={
+                "column_map": {"date": "date", "demand_qty": "demand_qty"},
+                "default_location_id": str(seed.location_id),
+            },
+        )
+        assert mapped.status_code == 200, mapped.text
+        committed = client.post(f"/api/v1/ingest/file/{upload_id}/commit")
+        assert committed.status_code == 200, committed.text
+        assert committed.json()["committed"] == 1
+        return upload_id
+
+    doomed = import_one("2026-01-10", 40)
+    kept = import_one("2026-01-11", 55)
+
+    deleted = client.delete(f"/api/v1/ingest/uploads/{doomed}")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["removed_rows"] == 1
+
+    assert _row(IngestUpload, doomed) is None
+    assert _row(IngestUpload, kept) is not None
+    remaining = client.get("/api/v1/ingest/demand").json()["data"]
+    assert [row["date"] for row in remaining] == ["2026-01-11"], remaining
+    assert (
+        _scalar(
+            "select count(*) from demand_observations where upload_id = :upload",
+            upload=doomed,
+        )
+        == 0
+    )
 
 
 # --------------------------------------------------------------------------- #

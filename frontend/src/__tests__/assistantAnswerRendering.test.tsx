@@ -128,6 +128,32 @@ beforeEach(() => {
 });
 
 describe('assistant answer rendering', () => {
+  it('starts closed and spends no session until a gesture opens it', async () => {
+    // The rail used to open itself on viewports wide enough to dock it, which
+    // took a 320px column from the page on every load. It is now closed at
+    // every width; only the launcher, Ctrl+J or a suggestion opens it.
+    render(
+      <AgentProvider>
+        <AgentLauncher />
+        <AgentPanel activeNavId="overview" onNavigate={vi.fn()} />
+      </AgentProvider>,
+    );
+    await flush();
+
+    expect(screen.queryByLabelText('DemandIQ Assistant')).toBeNull();
+    expect(screen.getByLabelText(/Open DemandIQ Assistant/i)).toBeTruthy();
+    // Opening lazily is also a quota argument: a session on render would spend
+    // the small concurrent allowance on a page view nobody asked anything on.
+    expect(mockPost.mock.calls.some(([p]) => p === '/api/v1/agent/sessions')).toBe(false);
+
+    await act(async () => {
+      screen.getByLabelText(/Open DemandIQ Assistant/i).click();
+    });
+    await flush();
+
+    expect(screen.getByLabelText('DemandIQ Assistant')).toBeTruthy();
+  });
+
   it('shows the API greeting when the panel is opened', async () => {
     render(
       <AgentProvider>

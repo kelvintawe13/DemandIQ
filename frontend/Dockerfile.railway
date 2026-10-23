@@ -56,9 +56,20 @@ COPY frontend ./frontend
 ARG VITE_API_URL=""
 ARG VITE_TURNSTILE_SITE_KEY=""
 ARG VITE_GOOGLE_CLIENT_ID=""
+
+# Footer build stamp (`src/lib/build.ts`). Railway sets RAILWAY_GIT_COMMIT_SHA
+# on every deploy and passes declared ARGs through as build args, so the footer
+# names the deployed commit with no manual wiring. GIT_SHA is the local escape
+# hatch for a manual `docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD)`.
+# With neither, the stamp is a timestamp.
+ARG GIT_SHA=""
+ARG RAILWAY_GIT_COMMIT_SHA=""
+
 ENV VITE_API_URL=${VITE_API_URL} \
     VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY} \
-    VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+    VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID} \
+    GIT_SHA=${GIT_SHA} \
+    RAILWAY_GIT_COMMIT_SHA=${RAILWAY_GIT_COMMIT_SHA}
 
 # vite.config.ts pins `base` to '/app/' for production builds, so the bundle
 # expects to be served under /app/ — same path the backend's _SpaStaticFiles

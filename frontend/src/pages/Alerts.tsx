@@ -194,7 +194,7 @@ export function Alerts({ onNavigate }: AlertsProps) {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <Panel title="Alert inbox" action={<button type="button" onClick={()=>void markAll()} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-caption font-semibold text-slate-600 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><CheckCheckIcon className="h-3.5 w-3.5" strokeWidth={2} />Mark all read</button>}>
           <TabBar
             tabs={tabs.map(option => ({

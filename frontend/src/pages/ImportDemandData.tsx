@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LockIcon, RefreshCwIcon, TrashIcon } from 'lucide-react';
+import {
+  ImageIcon,
+  ListIcon,
+  LockIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  TrashIcon,
+  XIcon,
+} from 'lucide-react';
+import { UploadEntriesPanel } from '../components/UploadEntriesPanel';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { SourceTabs } from '../components/SourceTabs';
 import { UploadImagePanel } from '../components/UploadImagePanel';
 import { PreviewPanel } from '../components/PreviewPanel';
@@ -26,6 +36,8 @@ interface UploadRow {
   status: string;
   row_count: number;
   error_count: number;
+  /** The original photo is stored server-side and can be shown again. */
+  has_source?: boolean;
   created_at: string | null;
 }
 
@@ -59,6 +71,20 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
 
   // uploads list — global loading: keep stale data visible while refreshing
   const [uploads, setUploads] = useState<UploadRow[]>([]);
+  /* The stored original opened from a row. The object URL is owned here so it
+     is revoked on close and on unmount, not left alive for the tab's lifetime. */
+  const [sourceView, setSourceView] = useState<{ id: string; filename: string; url: string } | null>(null);
+  const [sourceLoadingId, setSourceLoadingId] = useState<string | null>(null);
+  /* The upload whose committed entries are open in the editor below the list. */
+  const [entriesUpload, setEntriesUpload] = useState<UploadRow | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  /** The pending destructive action, shown in the app's own dialog. */
+  const [confirming, setConfirming] = useState<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    run: () => void;
+  } | null>(null);
   const [uploadsLoading, setUploadsLoading] = useState(true);
   const [uploadsRefreshing, setUploadsRefreshing] = useState(false);
   /* Read by the render to tell an initial load from a background refresh, so it
@@ -186,20 +212,124 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
     setCurrentCursor(copy.length ? copy[copy.length - 1] ?? undefined : undefined);
   };
 
+  /** Drop the open photo and release its object URL. */
+  const closeSource = () => {
+    setSourceView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  };
+
+  /* A photo opened from a row would otherwise keep a reference to a blob for as
+     long as the screen stays mounted, which is the whole session. */
+  useEffect(() => () => closeSource(), []);
+
+  /**
+   * Show the photo an image upload was read from, or hide it if already open.
+   *
+   * Fetched with the session's token rather than opened by URL: the endpoint is
+   * authenticated, so a plain link would arrive unauthenticated and 404.
+   */
+  const handleViewSource = async (row: UploadRow) => {
+    if (sourceView?.id === row.id) {
+      closeSource();
+      return;
+    }
+    // One panel under the list at a time: the photo and the entries are both
+    // about the same import, and stacking them pushed the table off screen.
+    setEntriesUpload(null);
+    setSourceLoadingId(row.id);
+    try {
+      const blob = await api.blob(`/api/v1/ingest/uploads/${row.id}/source`);
+      const url = URL.createObjectURL(blob);
+      setSourceView((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return { id: row.id, filename: row.filename, url };
+      });
+    } catch (e: unknown) {
+      if (e instanceof ApiException) toast(e.error.message, 'error');
+      else toast('Could not open the original photo', 'error');
+    } finally {
+      setSourceLoadingId(null);
+    }
+  };
+
+  /**
+   * Read the stored original again, or send the operator to the picker.
+   *
+   * Only photos keep their bytes, so a spreadsheet cannot be re-read; the
+   * honest fallback is the tab that accepts it again rather than a button that
+   * silently does nothing.
+   */
+  const handleRetry = async (row: UploadRow) => {
+    if (!row.has_source) {
+      setActiveTabId(row.kind === 'image' ? 'image' : 'excel');
+      toast(`Nothing stored to re-read — choose ${row.filename} to upload it again.`, 'info');
+      return;
+    }
+    setRetryingId(row.id);
+    try {
+      const res = await api.post<{ row_count: number }>(`/api/v1/ingest/uploads/${row.id}/retry`);
+      const count = res?.row_count ?? 0;
+      toast(`Re-read ${count} ${count === 1 ? 'row' : 'rows'} from the stored original`, 'success');
+      fetchUploads(currentCursor, { force: true });
+    } catch (e: unknown) {
+      if (e instanceof ApiException) toast(e.error.message, 'error');
+      else toast('Could not re-read the original', 'error');
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  const toggleEntries = (row: UploadRow) => {
+    if (entriesUpload?.id === row.id) {
+      setEntriesUpload(null);
+      return;
+    }
+    closeSource();
+    setEntriesUpload(row);
+  };
+
   /** Return the image panels to their empty state. */
   const clearImageSelection = () => {
     setJobId(null);
     setImageName(undefined);
   };
 
-  const handleDelete = async (id: string) => {
-    // Discarding a staged upload cannot be undone, so confirm before it happens.
-    if (!window.confirm('Discard this upload? Anything not yet imported is lost.')) return;
+  /**
+   * Ask before deleting, in the app's own dialog.
+   *
+   * `window.confirm` blocked the whole page and could not say which file, how
+   * many entries, or that history was involved — and the browser can suppress
+   * it entirely, turning a destructive click into an immediate delete. The
+   * dialog can carry all of that and is dismissible only on purpose.
+   */
+  const handleDelete = (id: string) => {
+    const row = uploadsRef.current.find((r) => r.id === id);
+    const committed = row?.status === 'committed';
+    const count = row?.row_count ?? 0;
+    const filename = row?.filename ?? 'this upload';
+    setConfirming({
+      title: committed ? `Delete ${filename}?` : `Discard ${filename}?`,
+      body: committed
+        ? `Deleting this import also deletes the ${count} ${count === 1 ? 'entry' : 'entries'} it wrote. They are removed from demand history permanently, and any forecast built on them is stale until it is re-run.`
+        : 'The staged rows are discarded. Anything not yet imported is lost, and this cannot be undone.',
+      confirmLabel: committed ? 'Delete import' : 'Discard upload',
+      run: () => void performDelete(id),
+    });
+  };
+
+  const performDelete = async (id: string) => {
     const deletingCurrentJob = id === jobId;
     try {
-      await api.delete(`/api/v1/ingest/uploads/${id}`);
+      const res = await api.delete<{ removed_rows?: number }>(`/api/v1/ingest/uploads/${id}`);
       if (deletingCurrentJob) clearImageSelection();
-      toast('Upload discarded');
+      // The photo is gone with the row; leaving it on screen would show an
+      // image for an upload that no longer exists.
+      if (sourceView?.id === id) closeSource();
+      if (entriesUpload?.id === id) setEntriesUpload(null);
+      const removed = res?.removed_rows ?? 0;
+      toast(removed > 0 ? `Import deleted — ${removed} ${removed === 1 ? 'entry' : 'entries'} removed` : 'Upload discarded');
       // Forced: the row on screen is known stale, so this must not be swallowed
       // by the in-flight guard.
       fetchUploads(currentCursor, { force: true });
@@ -222,10 +352,18 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
    * so the UI never sits on a job that is being deleted; if the delete itself
    * fails, the refreshed Recent uploads row is still there to retry from.
    */
-  const handleImageCancelled = async () => {
+  const handleImageCancelled = () => {
     if (!jobId) return;
-    if (!window.confirm('Discard this upload? Anything not yet imported is lost.')) return;
     const id = jobId;
+    setConfirming({
+      title: `Discard ${imageName ?? 'this upload'}?`,
+      body: 'The staged photo and the rows read from it are discarded. Nothing has been imported yet, and this cannot be undone.',
+      confirmLabel: 'Discard upload',
+      run: () => void performImageCancel(id),
+    });
+  };
+
+  const performImageCancel = async (id: string) => {
     clearImageSelection();
     try {
       await api.delete(`/api/v1/ingest/uploads/${id}`);
@@ -249,7 +387,7 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
   return (
     <>
       {/* Recent uploads */}
-      <section className="mb-3 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-h5 font-bold tracking-tight text-slate-900">Recent uploads</h2>
@@ -319,15 +457,66 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
                   { key:'status', label:'Status', render:(row:any)=> <StatusPill tone={statusTone[row.status] ?? 'neutral'} dot>{plainStatus(row.status)}</StatusPill> },
                   { key:'rows', label:'Rows', render:(row:any)=> <><span className="tabular-nums">{row.row_count}</span>{row.error_count > 0 && <span className="ml-1 text-red-600">({row.error_count} need fixing)</span>}</> },
                   { key:'created', label:'Created', render:(row:any)=> row.created_at ? new Date(row.created_at).toLocaleString() : '—' },
-                  { key:'delete', label:'', cellClassName:'pr-0', render:(row:any)=> row.status !== 'committed' && (
-                      <button
-                        type="button"
-                        aria-label={`Delete ${row.filename}`}
-                        onClick={() => handleDelete(row.id)}
-                        className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
-                      >
-                        <TrashIcon className="h-4 w-4" strokeWidth={1.9} />
-                      </button>) },
+                  /* One actions cell rather than three empty-headed columns:
+                     the list already has five labelled columns and each extra
+                     sliver pushed the file name into a scroll. */
+                  { key:'actions', label:'', cellClassName:'pr-0', render:(row:any)=> (
+                      <div className="flex items-center justify-end gap-0.5">
+                        {row.has_source && (
+                          <button
+                            type="button"
+                            aria-label={`View original photo of ${row.filename}`}
+                            aria-pressed={sourceView?.id === row.id}
+                            title="View original photo"
+                            disabled={sourceLoadingId === row.id}
+                            onClick={() => void handleViewSource(row)}
+                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
+                          >
+                            {sourceLoadingId === row.id
+                              ? <Spinner className="h-4 w-4" />
+                              : <ImageIcon className="h-4 w-4" strokeWidth={1.9} />}
+                          </button>
+                        )}
+                        {(row.status === 'committed' || row.row_count > 0) && (
+                          <button
+                            type="button"
+                            aria-label={`Show entries from ${row.filename}`}
+                            aria-pressed={entriesUpload?.id === row.id}
+                            title="Show the entries this import wrote"
+                            onClick={() => toggleEntries(row)}
+                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
+                          >
+                            <ListIcon className="h-4 w-4" strokeWidth={1.9} />
+                          </button>
+                        )}
+                        {row.status !== 'committed' && (
+                          <button
+                            type="button"
+                            aria-label={`Re-upload ${row.filename}`}
+                            title={row.has_source
+                              ? 'Read the stored original again'
+                              : 'Nothing stored — choose the file again'}
+                            disabled={retryingId === row.id}
+                            onClick={() => void handleRetry(row)}
+                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
+                          >
+                            {retryingId === row.id
+                              ? <Spinner className="h-4 w-4" />
+                              : <RotateCcwIcon className="h-4 w-4" strokeWidth={1.9} />}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Delete ${row.filename}`}
+                          title={row.status === 'committed'
+                            ? 'Delete this import and the entries it wrote'
+                            : 'Discard this upload'}
+                          onClick={() => handleDelete(row.id)}
+                          className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                        >
+                          <TrashIcon className="h-4 w-4" strokeWidth={1.9} />
+                        </button>
+                      </div>) },
                 ]}
               />
             </div>
@@ -351,6 +540,46 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
                   Next
                 </button>
               </div>
+            )}
+            {entriesUpload && (
+              <UploadEntriesPanel
+                upload={entriesUpload}
+                onClose={() => setEntriesUpload(null)}
+                onChanged={() => fetchUploads(currentCursor, { force: true })}
+              />
+            )}
+            {sourceView && (
+              /* The photo is shown here rather than in a new tab so it sits
+                 next to the rows it produced: the point of keeping it is to
+                 check a doubtful value without leaving the screen. */
+              <figure className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <figcaption className="flex items-center justify-between gap-2">
+                  <span className="truncate text-caption font-medium text-slate-600">
+                    Original photo · {sourceView.filename}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Close original photo"
+                    onClick={closeSource}
+                    className="tap-expand rounded-md p-1 text-slate-500 hover:bg-white hover:text-slate-700"
+                  >
+                    <XIcon className="h-4 w-4" strokeWidth={1.9} />
+                  </button>
+                </figcaption>
+                <a
+                  href={sourceView.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`Open ${sourceView.filename} full size`}
+                  className="mt-2 block"
+                >
+                  <img
+                    src={sourceView.url}
+                    alt={`Original photo: ${sourceView.filename}`}
+                    className="mx-auto max-h-[360px] w-auto max-w-full rounded border border-slate-200 bg-white object-contain"
+                  />
+                </a>
+              </figure>
             )}
               </div>
           </>
@@ -392,6 +621,19 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
         <span aria-hidden="true">•</span>
         <span>Your data is encrypted and protected.</span>
       </p>
+
+      {/* One dialog for every destructive action on this screen, carrying the
+          file name and the count so the confirmation is evidence, not a
+          speed bump. */}
+      <ConfirmDialog
+        open={Boolean(confirming)}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => confirming?.run()}
+        title={confirming?.title ?? ''}
+        body={confirming?.body ?? ''}
+        confirmLabel={confirming?.confirmLabel ?? 'Delete'}
+        tone="danger"
+      />
     </>
   );
 }

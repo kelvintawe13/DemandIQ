@@ -412,8 +412,8 @@ export function Analytics({ onNavigate }: AnalyticsProps) {
       </div>
 
       {/* Trend + location */}
-      <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        <section aria-labelledby="demand-trend-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2.5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <section aria-labelledby="demand-trend-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 id="demand-trend-heading" className="flex items-center gap-2 text-h4 font-bold tracking-tight text-slate-900">
@@ -462,7 +462,7 @@ export function Analytics({ onNavigate }: AnalyticsProps) {
           </div>
         </section>
 
-        <section aria-labelledby="demand-location-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <section aria-labelledby="demand-location-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="demand-location-heading" className="text-h4 font-bold tracking-tight text-slate-900">Demand by Location</h2>
             {/* There was a "Breakdown metric" selector here offering Visitors,
@@ -503,8 +503,8 @@ export function Analytics({ onNavigate }: AnalyticsProps) {
       </div>
 
       {/* Breakdown + insights */}
-      <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        <section aria-labelledby="performance-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2.5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <section aria-labelledby="performance-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           <h2 id="performance-heading" className="text-h4 font-bold tracking-tight text-slate-900">Performance Breakdown</h2>
           <p className="mt-1 text-meta text-slate-500">
             {breakdownByLocation
@@ -537,7 +537,7 @@ export function Analytics({ onNavigate }: AnalyticsProps) {
           )}
         </section>
 
-        <section aria-labelledby="top-insights-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <section aria-labelledby="top-insights-heading" className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           <h2 id="top-insights-heading" className="flex items-center gap-2.5 text-h4 font-bold tracking-tight text-slate-900"><LightbulbIcon className="h-5 w-5 text-brand-600" strokeWidth={2} />Top Insights</h2>
           {insightList.length===0 ? (
             <EmptyState variant="empty" size="sm" title="No insights" description="Not enough data to generate insights in this window." />
@@ -650,7 +650,7 @@ export function Analytics({ onNavigate }: AnalyticsProps) {
                 <DemandTrendChart
                   data={trendData.map(d=>({ label: d.label, current: d.current, previous: compareEnabled ? d.previous : undefined }))}
                   showPrevious={compareEnabled}
-                  height={340}
+                  height={280}
                 />
               )}
               {/* Legend: no overlap, wraps */}

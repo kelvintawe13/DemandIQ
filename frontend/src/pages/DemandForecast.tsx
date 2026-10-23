@@ -742,7 +742,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
         number the comparison is built on. These sat in separate admin screens
         before, so the operator who needs them never saw them together.
       */}
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="mt-3 grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <PreparePanel
           locationId={selectedLocationId}
           locationName={selectedLocationName}
@@ -762,10 +762,10 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
       </div>
 
       {/* Chart + insights */}
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)]">
+      <div className="mt-3 grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)]">
         <section
           aria-labelledby="forecast-overview-heading"
-          className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+          className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
             <div>
@@ -802,7 +802,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
 
           <div className="mt-3">
             {forecastsLoading ? (
-              <div className="flex h-[240px] items-center justify-center">
+              <div className="flex h-[200px] items-center justify-center sm:h-[220px]">
                 <Spinner label="Loading forecasts" className="h-8 w-8" />
               </div>
             ) : forecastsError ? (
@@ -842,7 +842,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
 
         <section
           aria-labelledby="ai-insights-heading"
-          className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+          className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
           
           <h2
             id="ai-insights-heading"
@@ -938,7 +938,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
       {/* Breakdown table */}
       <section
         aria-labelledby="forecast-breakdown-heading"
-        className="mt-3 rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4">
+        className="mt-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
         
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2

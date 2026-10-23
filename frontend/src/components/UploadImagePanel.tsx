@@ -130,7 +130,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   return (
     <section
       aria-labelledby="upload-image-heading"
-      className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+      className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5"
     >
       <h2 id="upload-image-heading" className="text-h3 font-bold tracking-tight text-brand-700">
         Upload Image

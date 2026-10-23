@@ -324,7 +324,7 @@ export function PolicyLab() {
   const currentResult = results.find((r) => r.policy === activePolicyKind);
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-3">
         {/* Location/period header */}
         <Panel

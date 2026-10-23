@@ -12,6 +12,7 @@ Run: python3.11 scripts/check_docker_context.py
 from __future__ import annotations
 
 import fnmatch as _fnmatch
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -122,10 +123,22 @@ class Ignore:
 
 
 def _segment_regex(segment: str) -> str:
-    """One path segment: '*' and '?' stop at the separator, '**' is handled apart."""
+    """One path segment: '*' and '?' stop at the separator, '**' is handled apart.
+
+    '[cod]' stays a character class, the way Docker's Go matcher reads it. Escaping
+    the brackets made `**/*.py[cod]` a literal match for a file named `*.py[cod]`,
+    so that rule — and any other class in a .dockerignore — excluded nothing.
+    """
     out = ""
     for ch in segment:
-        out += "[^/]" if ch == "?" else "[^/]*" if ch == "*" else re.escape(ch)
+        if ch == "?":
+            out += "[^/]"
+        elif ch == "*":
+            out += "[^/]*"
+        elif ch in "[]":
+            out += ch
+        else:
+            out += re.escape(ch)
     return out
 
 
@@ -147,12 +160,19 @@ def match(pattern: str, path: str) -> bool:
             return True
         return any(re.fullmatch(_segment_regex(segments[0]), p) for p in parts[:-1])
 
+    # The separator belongs BETWEEN segments, not after the last one. Appending
+    # it unconditionally built `**/node_modules/`, which no directory path can
+    # equal, so every multi-segment rule (`**/node_modules`, `frontend/dist`, a
+    # `!frontend/*.md` re-inclusion) silently matched nothing and the excluded
+    # tree was scanned and reported as if it would be sent.
+    last = len(segments) - 1
     regex = ""
-    for seg in segments:
+    for i, seg in enumerate(segments):
         if seg == "**":
-            regex += "(?:.*/)?"
+            # Crosses directories; as the final segment it is a bare prefix.
+            regex += "(?:.*/)?" if i < last else ".*"
         else:
-            regex += _segment_regex(seg) + "/"
+            regex += _segment_regex(seg) + ("/" if i < last else "")
     return re.fullmatch(regex, path) is not None
 
 
@@ -210,6 +230,31 @@ def dockerfile_copy_sources(dockerfile: Path) -> list[str]:
     return sources
 
 
+def sent_files(context: Path, ignore: "Ignore") -> list[tuple[Path, str]]:
+    """Every file Docker would actually send, with the rule that decided it.
+
+    Excluded directories are never descended into, because the daemon never
+    descends into them either — that is the same reason `decide` consults
+    ancestors. Pruning is not just faithful, it is what makes the scan finish:
+    a host `node_modules` is tens of thousands of files, and proving it is not
+    sent must not require reading it.
+    """
+    sent: list[tuple[Path, str]] = []
+    for dirpath, dirnames, filenames in os.walk(context):
+        directory = Path(dirpath)
+        prefix = directory.relative_to(context).as_posix()
+        prefix = "" if prefix == "." else prefix + "/"
+        dirnames[:] = sorted(d for d in dirnames if not ignore.decide(prefix + d)[0])
+        for name in sorted(filenames):
+            path = directory / name
+            if path.is_symlink():
+                continue
+            ignored, reason = ignore.decide(prefix + name)
+            if not ignored:
+                sent.append((path, reason))
+    return sent
+
+
 def check_build(context: Path, dockerfile: Path, verbose: bool) -> Report:
     report = Report()
     label = rel(context) if context != ROOT else "."
@@ -219,13 +264,8 @@ def check_build(context: Path, dockerfile: Path, verbose: bool) -> Report:
         print(f"    \033[33m⚠\033[0m no .dockerignore — the whole {label} tree is sent to the daemon")
         report.leaks.append(f"{label}: no .dockerignore")
 
-    for path in sorted(context.rglob("*")):
-        if path.is_dir() or path.is_symlink():
-            continue
+    for path, reason in sent_files(context, ignore):
         path_rel = path.relative_to(context).as_posix()
-        ignored, reason = ignore.decide(path_rel)
-        if ignored:
-            continue
         report.total += 1
         size = path.stat().st_size
         report.total_bytes += size

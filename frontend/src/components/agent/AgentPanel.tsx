@@ -211,10 +211,10 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
   // and only when no session exists yet; ask() still creates one lazily if this
   // call fails.
   //
-  // `userOpenedRef` is what keeps the rail honest: on a viewport that docks it
-  // the panel is open from the first render, and without this a page load would
-  // create a session nobody asked for. Only a gesture (the launcher, Ctrl+J, or
-  // asking) spends a session.
+  // `userOpenedRef` keeps session creation tied to a gesture: the panel is
+  // closed on load, but a future programmatic open must not create a session
+  // nobody asked for. Only a gesture (the launcher, Ctrl+J, or asking) spends a
+  // session.
   useEffect(() => {
     // `exhausted` is excluded on purpose: opening a panel with no allowance
     // left would 429 here and render an error before the user asked anything.
@@ -629,9 +629,10 @@ export function AgentPanel({ activeNavId, onNavigate }: AgentPanelProps) {
           // docked panel visibly flickers/jumps on open.
           //
           // One breakpoint only, and it is `min-[1180px]` — the same number as
-          // RAIL_MIN_WIDTH in AgentContext, which decides whether the panel is
-          // open on load. Below it the panel is a drawer over the page; at or
-          // above it the page keeps its width and the rail sits beside it.
+          // RAIL_MIN_WIDTH in AgentContext. Below it the panel is a drawer over
+          // the page; at or above it the page keeps its width and the rail sits
+          // beside it. Closed by default at both widths: nothing is rendered
+          // until the user opens it, so the content keeps the full width.
           initial={reduced ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={reduced ? undefined : { opacity: 0 }}

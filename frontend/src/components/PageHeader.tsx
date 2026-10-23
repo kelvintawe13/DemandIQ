@@ -20,7 +20,7 @@ export function PageHeader({
     back,
     canGoBack
   } = useNavigation();
-  return <header className="shrink-0 border-b border-slate-200 bg-slate-50 px-3 pb-2.5 pt-2.5 sm:px-4 md:border-b-0 md:pb-0 md:pt-4 lg:px-5">
+  return <header className="shrink-0 border-b border-slate-200 bg-slate-50 px-2.5 pb-2 pt-2 sm:px-3 md:border-b-0 md:pb-0 md:pt-3 lg:px-4">
       {/* Compact bar: only where the sidebar is hidden */}
       <div className="mb-2 flex items-center justify-between gap-2 md:hidden">
         <span className="flex min-w-0 items-center gap-1">
@@ -46,8 +46,8 @@ export function PageHeader({
 
       <div className="flex items-start justify-between gap-2 md:gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-2 md:gap-3">
-          {Icon && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-700 text-white md:h-10 md:w-10">
-              <Icon className="h-4 w-4 md:h-[18px] md:w-[18px]" strokeWidth={2} />
+          {Icon && <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-700 text-white md:h-9 md:w-9">
+              <Icon className="h-[15px] w-[15px] md:h-4 md:w-4" strokeWidth={2} />
             </span>}
           <div className="min-w-0 flex-1">
             <AnimatedTitle

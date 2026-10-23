@@ -151,8 +151,66 @@ A summary counts the rows worth a second look, and is absent when every row was
 unambiguous (a caveat that is always on is a caveat nobody reads). `engine`
 travels with the rows on `GET /ingest/image/{job_id}` for exactly this reason.
 
+## Messy spreadsheets are the normal case
+
+A logbook keyed into Excel is not a template: a title line, a date range, a
+blank spacer, `Visitors (adults)`, `1,112`, `Dec 3, 2025`, a `TOTAL` footer, an
+`n/a` week. Three rules keep such a file importable, and each one exists because
+its absence imported **nothing**:
+
+- **The header is found, not assumed.** `parse_file_table` walks the first 25
+  rows for the first one that names two or more canonical fields and carries no
+  dates. Row 1 being a title used to turn a four-column file into one column
+  named after the restaurant.
+- **The mapping arrives filled in.** `POST /ingest/file` returns `suggested_map`
+  (alias matching over a vocabulary of the words logs use), and the dropdowns
+  start from it. The old guess was `header.includes('date')` on raw names.
+- **A footer cannot veto the file.** Rows that are not data — totals, blanks,
+  `n/a` — are counted as `skipped_count` and named; they are not errors. Rows
+  that are data but unreadable are errors, listed, and **only block when nothing
+  is importable**: the readable days still commit, and the toast reports what was
+  left out. Requiring `error_count === 0` meant one `TOTAL` line made a whole
+  month uncommittable.
+
+`preamble_rows > 0` is surfaced in the upload card, so an operator can see the
+file was read past its title rather than mangled.
+
+Location names are matched **conservatively fuzzily**
+(`backend/app/services/ingestion/location_match.py`): case, accents, punctuation,
+doubled spaces and a one-word typo are normalised away, a shorter name contained
+in a longer one needs two shared words, and two equally plausible sites are
+refused rather than guessed. `Remera Grills` resolves to `Remer Grills`; an
+unknown site is still an error the operator sees.
+
+## Photos of a page
+
+The image pipeline flattens the lighting (subtracting a heavily blurred copy of
+the page) before it stretches contrast, then deskews by up to 6 degrees measured
+on a 240px probe. Measured on a six-image set: a shadow across the page went
+from **0 rows to 3 correct**, a 4.5-degree tilt from **2 rows (one wrong) to 3
+correct**, and clean/low-resolution pages were unchanged. A median filter was
+tried and removed — it cleaned speckle the flattening already handled and turned
+hand-written `98` into `9` and `134` into `434`.
+
+Handwriting remains the weak case: jittered glyphs still misread digits (a
+`2025` came back `2925` in one sample), which is why every row carries its own
+readability score and the review screen asks for confirmation. `OCR_SERVICE_URL`
+remains the route to a real handwriting model.
+
+## The original photo is kept (`../../pages/ImportDemandData.tsx`)
+
+Reviewing OCR rows means comparing them with the page they came from, so the
+upload now stores the photo itself (`ingest_uploads.source_image`, deferred so
+listing uploads never loads it) and serves it at
+`GET /ingest/uploads/{id}/source`, workspace-scoped like the rows inside it.
+`GET /ingest/uploads` reports only `has_source`, and Recent uploads shows a
+photo control for those rows that expands the image beneath the table — no new
+tab, and the object URL is revoked on close. Uploads from before the photo was
+kept have nothing stored and answer `404 no_source`, rather than rendering an
+empty frame that looks like a failed photo.
+
 ## Key Props / Contracts / Data Sources
-Contracts: `POST /ingest/file {id, preview}`, `POST /ingest/file/{id}/mapping`, `POST /ingest/file/{id}/commit`, `POST /ingest/manual`, `POST /ingest/image` + `GET /ingest/image/{job_id}` (OCR), `GET /ingest/uploads`. Canonical row `UNIQUE(location_id,date)` per `database/schema.sql:132`.
+Contracts: `POST /ingest/file {id, preview}`, `POST /ingest/file/{id}/mapping`, `POST /ingest/file/{id}/commit`, `POST /ingest/manual`, `POST /ingest/image` + `GET /ingest/image/{job_id}` (OCR), `GET /ingest/uploads` (+ `GET /ingest/uploads/{id}/source` for the stored photo). Canonical row `UNIQUE(location_id,date)` per `database/schema.sql:132`.
 
 DB invariants referenced: `demand_observations UNIQUE(location_id,date)` (`database/schema.sql:132`), `forecasts.as_of_timestamp` NOT NULL (`schema.sql:227`), evidence boundary `waste_observations` with no FK (`schema.sql:268-271`), two-person rule `CHECK(decided_by<>requested_by)` (`schema.sql:405`).
 

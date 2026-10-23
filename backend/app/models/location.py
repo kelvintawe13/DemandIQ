@@ -5,7 +5,16 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    Numeric,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -126,6 +135,13 @@ class IngestUpload(Base):
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     preview: Mapped[dict | None] = mapped_column(MutableJSONB, nullable=True)
+    # The original photo, kept so an operator can put the image back next to the
+    # rows it produced — the preview holds only the parsed rows, which is
+    # useless for checking a misread by eye. Deferred: listing uploads must not
+    # drag megabytes per row into the session.
+    source_image: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    # Sniffed at upload time from the bytes, never the client's Content-Type.
+    source_mime: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

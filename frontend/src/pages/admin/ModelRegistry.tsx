@@ -449,7 +449,7 @@ export function ModelRegistry(){
     <div className="flex flex-col gap-3">
       {servingPanel}
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-3">
         <Panel title="Training runs in flight" icon={PlayIcon} description="Runs that produce or recalibrate a model, and any pipeline job queued or running right now." action={<span className="text-micro text-slate-500">{inFlightRuns.length} in flight</span>}>
           {trainingRuns.length===0 ? <EmptyState variant="empty" size="sm" title="Nothing in flight" description="No training or calibration run is queued or running right now." hints={["Retrains run Sundays 02:00","Calibration follows at 03:40"]} /> : (

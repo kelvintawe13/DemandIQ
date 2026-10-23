@@ -88,7 +88,7 @@ export function DatasetsAdmin(){
   if(error) return <EmptyState variant={error.variant} title={error.title} description={error.desc} action={{label:'Retry',onClick:()=>void fetch()}} size="md" />;
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
       <Panel title="Registered datasets" icon={DatabaseIcon} description="Provenance, access conditions and audited shape for every source in the framework.">
         {datasets.length===0 ? (
           <EmptyState variant="empty" size="md" title="No datasets registered" description="Datasets will appear once ingestion registers them." hints={["Ingest demand first","Datasets are audited on registration"]} />

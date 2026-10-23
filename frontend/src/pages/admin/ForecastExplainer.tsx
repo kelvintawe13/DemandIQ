@@ -159,7 +159,7 @@ export function ForecastExplainer() {
   const pos = (value: number) => (value - axisMin) / Math.max(1, axisMax - axisMin) * 100;
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+    <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
       <Panel
         title="Past forecasts"
         icon={SearchCheckIcon}

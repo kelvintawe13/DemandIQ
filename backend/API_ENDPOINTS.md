@@ -53,7 +53,9 @@ Base URL: `/api/v1` — **177 paths → 213 items** (`openapi.json` via `backend
 | `POST`   | `/ingest/image/{job_id}/commit`    | Commits corrected OCR rows.                                                                                                        |
 | `GET`    | `/ingest/uploads`                  | Recent uploads with status, row counts and errors.                                                                                 |
 | `GET`    | `/ingest/demand`                   | Stored demand rows, newest first. Filters: `location_id`, `upload_id` (the rows one import wrote), `limit` ≤ 50, `offset`. Each row reports `source` and its provenance — `upload_id` / `upload_filename`, `null` for a row that never came from a file. |
-| `DELETE` | `/ingest/uploads/{id}`             | Discards an uncommitted upload.                                                                                                    |
+| `GET`    | `/ingest/uploads/{id}/source`      | The original photo an image upload was read from, typed from the bytes that were stored (`404 no_source` when none was kept). |
+| `POST`   | `/ingest/uploads/{id}/retry`       | Re-reads a stored original and replaces the staged rows (`409 no_source` for a spreadsheet, `409 already_committed` once committed). |
+| `DELETE` | `/ingest/uploads/{id}`             | Deletes the upload **and the demand rows it wrote** — the undo for an import, committed or not. Returns `{deleted, filename, removed_rows}`.                                                                                                    |
 
 ## Locations & menu
 

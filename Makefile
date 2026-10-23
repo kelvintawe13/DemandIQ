@@ -155,6 +155,12 @@ verify: lint-backend test-backend check-fields auth-e2e test-backend-integration
 
 COMPOSE ?= docker compose
 
+# The commit stamped into the frontend bundle's footer. Compose can only
+# interpolate the environment and the image has no .git, so the hash is resolved
+# here and handed to the build as a build arg; without it the footer shows a
+# build timestamp instead. Override with `GIT_SHA=abc1234 make docker-up`.
+GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+
 # The only container target that needs no Docker: it walks each build context the
 # way the daemon would and fails on a credential, a host artifact, or a COPY
 # source that does not exist. Runs in ~1s, so it is worth running before every
@@ -166,10 +172,10 @@ docker-config: ## Validate docker-compose.yml without building or starting
 	$(COMPOSE) config --quiet && echo "compose file is valid"
 
 docker-build: ## Build both images
-	$(COMPOSE) build
+	GIT_SHA=$(GIT_SHA) $(COMPOSE) build
 
 docker-up: ## Build + start the full stack (stores, migrations, API, web)
-	$(COMPOSE) up -d --build
+	GIT_SHA=$(GIT_SHA) $(COMPOSE) up -d --build
 	@echo "UI:      http://localhost:$${WEB_PORT:-5173}/app/"
 	@echo "Console: http://localhost:$${WEB_PORT:-5173}/"
 	@echo "Status:  make docker-ps"
@@ -190,7 +196,7 @@ docker-stores: ## Start only postgres + redis (for the host-based dev flow)
 	$(COMPOSE) up -d postgres redis
 
 docker-dev: ## Full stack plus the vite dev server with HMR on :5174
-	$(COMPOSE) --profile dev up -d --build
+	GIT_SHA=$(GIT_SHA) $(COMPOSE) --profile dev up -d --build
 
 docker-worker: ## Also run the background-job worker (opt-in profile)
 	$(COMPOSE) --profile worker up -d

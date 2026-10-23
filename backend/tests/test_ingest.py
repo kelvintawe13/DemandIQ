@@ -629,8 +629,13 @@ def test_uploads_list_and_delete() -> None:
     )
 
     mock_db = MagicMock()
-    # list -> scalars returns [upload]
-    mock_db.scalars.return_value = MagicMock(all=MagicMock(return_value=[upload]))
+    # The list query now selects the upload together with a SQL boolean saying
+    # whether its photo was kept, so the route reads rows from `execute` —
+    # asking the ORM object for `source_image` would drag the photo into the
+    # session, which is the thing the deferred column exists to avoid.
+    mock_db.execute.return_value = MagicMock(
+        rowcount=0, all=MagicMock(return_value=[(upload, False)])
+    )
     mock_db.get.return_value = upload
     mock_db.delete = MagicMock()
     mock_db.flush = MagicMock()
@@ -646,9 +651,11 @@ def test_uploads_list_and_delete() -> None:
     assert resp.status_code == 200
     assert "data" in resp.json()
 
-    # Delete the uncommitted upload
+    # Delete the upload. The response reports what went with it — zero rows
+    # here, since this one was never committed.
     resp = client.delete(f"/api/v1/ingest/uploads/{upload.id}")
-    assert resp.status_code == 204
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["removed_rows"] == 0
 
     app.dependency_overrides.clear()
 

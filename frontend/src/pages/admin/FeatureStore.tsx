@@ -84,7 +84,7 @@ export function FeatureStore(){
   })();
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
       <Panel title="Features" icon={LayersIcon} description={`${inProduction} of ${features.length} features are used by the live model.`}>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row">
           <div className="flex min-w-0 flex-1 items-center rounded-lg border border-slate-300 bg-white focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500">

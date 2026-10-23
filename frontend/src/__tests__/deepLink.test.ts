@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { authRouteFromPath, initialScreenFromPath, pathForRouteId, routeIdFromPath, withBase } from '../lib/route';
+import {
+  authRouteFromPath,
+  bootRouteFromPath,
+  initialScreenFromPath,
+  pathForRouteId,
+  routeIdFromPath,
+  withBase,
+} from '../lib/route';
 import { pageMeta } from '../data/pages';
 
 describe('routeIdFromPath', () => {
@@ -99,6 +106,43 @@ describe('the /app mount', () => {
     expect(authRouteFromPath('/app/signup', BASE)).toBe('signup');
     expect(withBase('/login', BASE)).toBe('/app/login');
     expect(withBase('/', BASE)).toBe('/app/');
+  });
+});
+
+describe('bootRouteFromPath', () => {
+  // Opening the console is a decision made once, at load: which screen, and
+  // whether there is a session at all.
+  it('opens the console for a screen link when a credential is stored', () => {
+    expect(bootRouteFromPath('/reports', { hasToken: true })).toBe('app');
+  });
+
+  it('opens sign-in for a screen link with no credential', () => {
+    // Not the landing page (the link looked ignored) and not the shell, which
+    // rendered one 401 panel per call with no way back to sign-in.
+    expect(bootRouteFromPath('/reports', { hasToken: false })).toBe('signin');
+    expect(bootRouteFromPath('/admin-models', { hasToken: false })).toBe('signin');
+  });
+
+  it('keeps the mount root public', () => {
+    // `/` is the marketing page, not a screen link: it must not bounce a first
+    // visitor to a sign-in form they did not ask for.
+    expect(bootRouteFromPath('/', { hasToken: false })).toBe('landing');
+    expect(bootRouteFromPath('/app/', { hasToken: false, base: '/app' })).toBe('landing');
+  });
+
+  it('lets a named auth screen win over the credential', () => {
+    expect(bootRouteFromPath('/login', { hasToken: false })).toBe('signin');
+    expect(bootRouteFromPath('/signup', { hasToken: false })).toBe('signup');
+    expect(bootRouteFromPath('/login', { hasToken: true })).toBe('signin');
+  });
+
+  it('honours the startAuthenticated harness', () => {
+    expect(bootRouteFromPath('/', { hasToken: false, startAuthenticated: true })).toBe('app');
+  });
+
+  it('reads screen links under the /app mount', () => {
+    expect(bootRouteFromPath('/app/reports', { hasToken: false, base: '/app' })).toBe('signin');
+    expect(bootRouteFromPath('/app/reports', { hasToken: true, base: '/app' })).toBe('app');
   });
 });
 

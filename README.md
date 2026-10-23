@@ -965,7 +965,7 @@ Full guide, topology rationale and troubleshooting: [DOCKER.md](DOCKER.md).
 | Frontend | `npm run test` | 486 passed across 53 files |
 | Model | `make test-model` | leakage gate + ML pipeline (needs `model[model]` extras) |
 | Auth E2E | `make auth-e2e` | 25 checks on a disposable Postgres with real migrations and real HTTP |
-| Image E2E | `make e2e-image` | Uploads a photo in Chromium, checks OCR rows and inline editing, then discards the staged job (needs `BACKEND_EXTRAS=ocr`) |
+| Image E2E | `make e2e-image` | Uploads a photo in Chromium, checks OCR rows and inline editing, then discards the staged job (the `ocr` extra is installed by default) |
 | Lint / types | `make lint-backend lint-frontend typecheck-frontend` | ruff, black, mypy, eslint, `tsc --noEmit` all clean |
 
 One-command verification: `npm run verify`.

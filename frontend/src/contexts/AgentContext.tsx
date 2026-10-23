@@ -136,39 +136,33 @@ function errToState(e: unknown, fallbackTitle = 'Failed to load'): AgentErrorSta
 }
 
 /**
- * Width at which the assistant is a docked third column instead of an overlay.
- * It must match the `min-[1180px]:` classes in `agent/AgentPanel`. Chosen over
- * Tailwind's `xl` (1280) so an iPad in landscape and every laptop get the rail,
- * while 1024px — where a 236px sidebar, a 360px rail and the content region do
- * not coexist — stays an overlay.
+ * Width at which an open assistant docks as a third column instead of
+ * overlaying the page. It must match the `min-[1180px]:` classes in
+ * `agent/AgentPanel`. Chosen over Tailwind's `xl` (1280) so an iPad in landscape
+ * and every laptop get the rail, while 1024px — where a 236px sidebar, a 320px
+ * rail and the content region do not coexist — stays an overlay.
  */
 export const RAIL_MIN_WIDTH = 1180;
-const RAIL_QUERY = `(min-width: ${RAIL_MIN_WIDTH}px)`;
-
-/** True when the viewport is wide enough for the rail to be docked. */
-export function railDocks(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia(RAIL_QUERY).matches
-    : false;
-}
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useSession();
   const { toast } = useToast();
-  // The rail is present by default wherever it docks; on overlay widths the
-  // panel starts closed so it never covers the page uninvited.
-  const [open, setOpen] = useState(railDocks);
+  // Closed on load at every width: a 320px rail is opened by a gesture (the
+  // header launcher, Ctrl+J, a suggestion), never taken over the page on a page
+  // view nobody asked a question on. Docking only decides *how* it appears
+  // once open — beside the content above 1180px, over it below.
+  const [open, setOpen] = useState(false);
   /**
-   * Whether the *user* has opened the panel, as opposed to it being open because
-   * the rail docks.
+   * Whether the *user* has opened the panel.
    *
    * The panel creates an assistant session when it opens, and a session on mount
    * is exactly what was removed before: React StrictMode's double-mount alone
-   * created two, and the concurrent-session allowance eventually 409'd. A rail
-   * that is open by default must not spend that allowance on a page load nobody
-   * asked anything on, so the session is only opened once a gesture says so —
-   * or lazily by `ask()`. A ref rather than state because it is read by an effect
-   * that already re-runs when `open` changes.
+   * created two, and the concurrent-session allowance eventually 409'd. Every
+   * route into `open` is a gesture today, so this is true whenever the panel is,
+   * but it stays as the explicit gate the panel reads: a future programmatic
+   * open (a deep link, a notification) must not start spending sessions on
+   * render. A ref rather than state because it is read by an effect that already
+   * re-runs when `open` changes.
    */
   const userOpenedRef = useRef(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);

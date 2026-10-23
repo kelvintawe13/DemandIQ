@@ -81,3 +81,26 @@ export function initialScreenFromPath(pathname: string, base: string = BASE): st
   if (/^\/*$/.test(withoutBase(pathname, base))) return null;
   return routeIdFromPath(pathname, base);
 }
+
+/**
+ * The first screen a load opens, from the URL plus what the browser holds.
+ *
+ * Order matters. An auth path names its own screen, so `/login` survives a
+ * reload. A console URL with a credential opens the console. A console URL
+ * with **no** credential is a sign-in: it used to open the landing page (the
+ * link the user followed looked ignored), and if any token-shaped value
+ * survived it opened the shell instead, whose every panel then rendered the
+ * backend's 401 copy with nothing on screen able to sign out. The mount root
+ * stays public — `/` is the landing page, not a screen link.
+ */
+export function bootRouteFromPath(
+  pathname: string,
+  options: { hasToken: boolean; startAuthenticated?: boolean; base?: string } = { hasToken: false }
+): 'app' | 'signin' | 'signup' | 'landing' {
+  const { hasToken, startAuthenticated = false, base = BASE } = options;
+  const authRoute = authRouteFromPath(pathname, base);
+  if (authRoute === 'signin' || authRoute === 'signup') return authRoute;
+  if (startAuthenticated) return 'app';
+  if (hasToken) return 'app';
+  return initialScreenFromPath(pathname, base) ? 'signin' : 'landing';
+}

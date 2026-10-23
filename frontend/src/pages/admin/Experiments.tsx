@@ -84,7 +84,7 @@ export function Experiments(){
   );
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <Panel title="Evaluation runs" icon={FlaskConicalIcon} description="Rolling-origin folds and bounded tuning trials measured by the training run and published from the serving bundle.">
         <ul className="flex flex-col gap-2">
           {experiments.map((experiment)=>{

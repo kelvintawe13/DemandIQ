@@ -138,7 +138,7 @@ export function Sources({ onNavigate }: SourcesProps) {
     // carry two conflicting names for the same idea.
     { key:'source', label:'Channel', primary:true, sortable:true, render:(s:any)=>{
       const Icon = (kindIcon[kindLabel(kindOf(s))] ?? kindIcon[kindOf(s)] ?? SettingsIcon);
-      return <span className="flex items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50"><Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.8} /></span><span className="min-w-0"><span className="block truncate text-body-sm font-semibold text-slate-900">{s.name}</span><span className="block truncate text-micro text-slate-500">{kindLabel(kindOf(s))} · {s.freshness ?? s.detail ?? ''}</span></span></span>;
+      return <span className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50"><Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.8} /></span><span className="min-w-0"><span className="block truncate text-body-sm font-semibold text-slate-900">{s.name}</span><span className="block truncate text-micro text-slate-500">{kindLabel(kindOf(s))} · {s.freshness ?? s.detail ?? ''}</span></span></span>;
     } },
     { key:'sync', label:'Last sync', sortable:true, render:(s:any)=> <span className="text-meta font-medium text-slate-700">{s.last_sync_at ? new Date(s.last_sync_at).toLocaleString() : '—'}</span> },
     { key:'volume', label:'Volume', sortable:true, render:(s:any)=> <span className="text-meta font-medium text-slate-700">{s.volume ?? s.rows ?? '—'}</span> },
@@ -190,7 +190,7 @@ export function Sources({ onNavigate }: SourcesProps) {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <Panel title="Connected sources" description="Status, freshness and volume per channel." action={<button type="button" onClick={()=>onNavigate('ingestion')} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-2.5 text-meta font-semibold text-white sm:py-2 transition-colors duration-150 ease-out hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"><PlusIcon className="h-4 w-4" strokeWidth={2.25} />Add source</button>}>
             <FilterBar<any>
@@ -235,7 +235,7 @@ export function Sources({ onNavigate }: SourcesProps) {
                   const Icon = (kindIcon[kindLabel(kindOf(source))] ?? kindIcon[kindOf(source)] ?? SettingsIcon);
                   const st = stateOf(source);
                   return (
-                    <li key={source.id} className="flex items-center gap-2.5 py-2">
+                    <li key={source.id} className="flex items-center gap-2.5 py-2 sm:py-1.5">
                       <Icon className="h-4 w-4 shrink-0 text-brand-600" strokeWidth={1.8} />
                       <span className="min-w-0 flex-1 truncate text-meta font-semibold text-slate-900">{source.name}</span>
                       <StatusPill tone={statusTone[st] ?? 'neutral'} dot>{st}</StatusPill>
@@ -254,8 +254,8 @@ export function Sources({ onNavigate }: SourcesProps) {
                   const Icon = (kindIcon[key] ?? kindIcon[rawKind] ?? SettingsIcon);
                   const st = source.status ?? source.health ?? 'unknown';
                   return (
-                    <li key={source.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 px-3 py-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50"><Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.8} /></span>
+                    <li key={source.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 px-2.5 py-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50"><Icon className="h-[18px] w-[18px] text-brand-600" strokeWidth={1.8} /></span>
                       <div className="min-w-[160px] flex-1">
                         <p className="truncate text-body-sm font-semibold text-slate-900">{source.name}</p>
                         {/* Show the humanised channel name (`momo` -> `Mobile Money`)
@@ -302,7 +302,7 @@ export function Sources({ onNavigate }: SourcesProps) {
               <ul className="flex flex-col gap-2">{ingestSchedule.map((job)=>{
                 const last = job.last_run;
                 return (
-                  <li key={job.job_type} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 px-3 py-3">
+                  <li key={job.job_type} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 px-2.5 py-2.5">
                     <div className="min-w-[150px] flex-1">
                       <p className="truncate text-body-xs font-semibold text-slate-900">{jobLabel(job.job_type)}</p>
                       <p className="truncate text-micro text-slate-500">{job.cadence}</p>

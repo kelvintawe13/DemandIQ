@@ -800,7 +800,7 @@ export function QualityMonitor(_props: { onNavigate?: (id: string) => void }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)]">
         {/* Score + dimensions */}
         <Panel title="Dimension analysis" description="Each check against healthy (≥90) and watch (≥70) thresholds.">
           <div className="mb-4 flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 px-3.5 py-3">

@@ -7,6 +7,7 @@ import { NavigationProvider } from './contexts/NavigationContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AppShell } from './components/AppShell';
 import { ErrorPage } from './pages/ErrorPage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Landing } from './pages/Landing';
 import { SignIn } from './pages/auth/SignIn';
 import { LegalProvider } from './contexts/LegalContext';
@@ -114,7 +115,7 @@ import { SESSION_EXPIRED_MESSAGE, notifySessionExpired, onSessionExpired } from 
 import { pageMeta } from './data/pages';
 import { syncDocumentMeta } from './hooks/useDocumentTitle';
 import { useWorkspaceTimezone } from './hooks/useWorkspaceTimezone';
-import { authRouteFromPath, initialScreenFromPath, pathForRouteId, withBase } from './lib/route';
+import { authRouteFromPath, bootRouteFromPath, initialScreenFromPath, pathForRouteId, withBase } from './lib/route';
 
 /**
  * Screens that sit outside the role navigation but every signed-in seat owns.
@@ -237,15 +238,15 @@ function AppBooted({
       return false;
     }
   });
-  // A direct hit on `/login` or `/signup` names an auth screen, so it wins over
-  // the seat guess: without this the landing page rendered and its URL sync
-  // rewrote `/login` back to `/`. Falling through to `app`/`landing` when the
-  // path is not an auth path keeps a plain reload restoring the session.
-  const [route, setRoute] = useState<Route>(() => {
-    const authRoute = authRouteFromPath(window.location.pathname);
-    if (authRoute) return authRoute as Route;
-    return startAuthenticated || hasPersistedSession ? 'app' : 'landing';
-  });
+  // Boot routing, in one place: a direct hit on `/login` or `/signup` names an
+  // auth screen (without this the landing page rendered and its URL sync rewrote
+  // `/login` back to `/`); a console URL with a credential opens the console so a
+  // reload keeps the user's place; a console URL with no credential opens
+  // sign-in rather than a marketing page or a shell full of 401s.
+  // See bootRouteFromPath.
+  const [route, setRoute] = useState<Route>(() =>
+    bootRouteFromPath(window.location.pathname, { hasToken: hasPersistedSession, startAuthenticated })
+  );
   const [resetEmail, setResetEmail] = useState('');
   // Welcome is shown once per successful entry, and is framed differently for
   // a brand-new workspace than for a returning sign-in.
@@ -262,6 +263,15 @@ function AppBooted({
   // tab does — iOS evicts background tabs — so without this, refreshing or
   // reopening the app dropped the user back on their home screen.
   const pendingDeepLink = useRef<string | null>(initialScreenFromPath(window.location.pathname));
+
+  // Last line of defence for a session that dies without a request failing
+  // first (another tab signs out, the token is cleared underneath us). The
+  // shell must never stay mounted without a credential: it renders one 401
+  // panel per call and offers no way back to sign-in.
+  useEffect(() => {
+    if (route !== 'app' || startAuthenticated || session.isAuthenticated) return;
+    setRoute('signin');
+  }, [route, startAuthenticated, session.isAuthenticated]);
 
   // Align the demo seat + landing page with the RESTORED session's role so a
   // reload lands the user on the same screen they left (and the sidebar shows
@@ -625,10 +635,14 @@ function AppBooted({
           <>
             <AppShell activeNavId={activeNavId} onNavigate={navigate}>
               {/* Inside the shell, so a page chunk loads behind the nav rather
-                  than replacing it with a bare fallback. */}
-              <Suspense fallback={<LoadingState label="Loading this page" />}>
-                {renderPage()}
-              </Suspense>
+                  than replacing it with a bare fallback — and so a page that
+                  throws keeps the nav alive instead of blanking the document.
+                  Keyed by screen: navigating away resets the boundary. */}
+              <ErrorBoundary key={activeNavId} onHome={() => navigate(account.home)}>
+                <Suspense fallback={<LoadingState label="Loading this page" />}>
+                  {renderPage()}
+                </Suspense>
+              </ErrorBoundary>
             </AppShell>
             <WelcomeModal
               open={Boolean(welcome)}
@@ -661,8 +675,11 @@ function AppBooted({
       <AgentProvider>
         <LegalProvider>
           {/* Catches the auth-flow screens; app pages have their own boundary
-              inside AppShell. */}
-          <Suspense fallback={<LoadingState label="Loading" />}>{renderRoute()}</Suspense>
+              inside AppShell. Without this, a crash on the sign-in screen was a
+              blank document — the one screen that can recover a session. */}
+          <ErrorBoundary>
+            <Suspense fallback={<LoadingState label="Loading" />}>{renderRoute()}</Suspense>
+          </ErrorBoundary>
         </LegalProvider>
       </AgentProvider>
     </NavigationProvider>);

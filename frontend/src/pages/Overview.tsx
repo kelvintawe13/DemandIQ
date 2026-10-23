@@ -361,7 +361,7 @@ export function Overview({ onNavigate }: OverviewProps) {
       </div>
 
       {/* Primary: today's demand */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <Panel className="xl:p-4">
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
             <div>
@@ -494,7 +494,7 @@ export function Overview({ onNavigate }: OverviewProps) {
       </div>
 
       {/* Secondary: activity + alerts */}
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="mt-3 grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <Panel title="Recent activity" description="Everything that touched your data.">
           {activity.length === 0 ? (
             <EmptyState

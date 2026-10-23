@@ -9,6 +9,7 @@ import { pageMeta } from '../data/pages';
 import { navRootFor } from '../data/navItems';
 import { AgentPanel } from './agent/AgentPanel';
 import { useNavBadges } from '../hooks/useNavBadges';
+import { BUILD_ID } from '../lib/build';
 
 interface AppShellProps {
   activeNavId: string;
@@ -21,9 +22,9 @@ interface AppShellProps {
  * and bottom nav stay mounted, so navigating only swaps the content region.
  */
 export function AppShell({ activeNavId, onNavigate, children }: AppShellProps) {
-  // The sidebar opens at full width regardless of the assistant rail: the rail
-  // is a default, not a reason to take navigation away. Collapsing stays the
-  // user's call.
+  // The sidebar opens at full width and is never touched by the assistant: the
+  // rail starts closed and, once opened, does not take navigation away.
+  // Collapsing stays the user's call.
   const [collapsed, setCollapsed] = useState(false);
   const reduced = useReducedMotion();
   // Real counts (unread alerts / pending approvals), fetched once for both
@@ -49,7 +50,7 @@ export function AppShell({ activeNavId, onNavigate, children }: AppShellProps) {
         <SiteBanner />
         <PageHeader title={meta.title} subtitle={meta.subtitle} icon={meta.icon} />
 
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-6 pt-3 sm:px-4 sm:pb-5 lg:px-5">
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2.5 pb-5 pt-2.5 sm:px-3 sm:pb-4 lg:px-4">
           {/* Only the content region animates; the shell around it never moves. */}
           <motion.div
             key={activeNavId}
@@ -62,7 +63,16 @@ export function AppShell({ activeNavId, onNavigate, children }: AppShellProps) {
         </main>
 
         <PageFooter>
-          <p className="truncate">{meta.footerLeft}</p>
+          {/* The build this tab is running, on the LEFT: the consent banner is
+              docked bottom-right and covered this when it sat beside
+              footerRight, which defeated the point of a visible stamp. */}
+          <p className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{meta.footerLeft}</span>
+            <span aria-hidden="true">·</span>
+            <span className="shrink-0 font-mono text-fine" title={`Build ${BUILD_ID}`} data-testid="build-id">
+              build {BUILD_ID}
+            </span>
+          </p>
           <span className="truncate">{meta.footerRight}</span>
         </PageFooter>
 

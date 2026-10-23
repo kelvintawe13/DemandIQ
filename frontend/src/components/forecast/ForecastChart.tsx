@@ -29,7 +29,7 @@ export function ForecastChart({ data }: ForecastChartProps) {
     series.flatMap((p) => [p.historical ?? 0, p.forecast ?? 0, p.band ? p.band[1] : 0]),
   );
   return (
-    <div className="h-[240px] w-full overflow-hidden sm:h-[260px]">
+    <div className="h-[200px] w-full overflow-hidden sm:h-[220px]">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={series}

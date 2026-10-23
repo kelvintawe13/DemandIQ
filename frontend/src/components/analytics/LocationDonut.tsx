@@ -16,15 +16,15 @@ export function LocationDonut({ data }: Props) {
     return sum > 200 ? sum.toLocaleString() : `${sum.toFixed(1)}%`;
   })();
   return (
-    <div className="relative h-[190px] w-[190px] shrink-0">
+    <div className="relative h-[168px] w-[168px] shrink-0">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={d}
             dataKey="value"
             nameKey="name"
-            innerRadius={58}
-            outerRadius={92}
+            innerRadius={50}
+            outerRadius={80}
             paddingAngle={1}
             startAngle={90}
             endAngle={-270}

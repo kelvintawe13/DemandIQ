@@ -234,11 +234,16 @@ def commit_demand(
     # Source tagging — at least one provenance signal should survive.
     # ``source`` is kept in ``notes`` when no connector/upload is present so
     # that the quality monitor can still attribute the row without a JOIN.
+    #
+    # One format, always bracketed. The unbracketed ``source:file`` used when the
+    # row carried no operator note was not what the demand read parsed, so
+    # `source` came back null for most rows in the workspace — the write and the
+    # read disagreed about their own tag. The `source not in notes` guard is gone
+    # with it: a note that happened to contain the word "manual" used to drop the
+    # tag entirely.
     tagged_notes = notes
-    if source and not notes:
-        tagged_notes = f"source:{source}"
-    elif source and notes and source not in notes:
-        tagged_notes = f"{notes} [source:{source}]"
+    if source:
+        tagged_notes = f"{notes} [source:{source}]" if notes else f"[source:{source}]"
 
     # --- Idempotent upsert on (location_id, date) --------------------------
     existing: DemandObservation | None = db.scalar(

@@ -28,12 +28,29 @@ interface FileUploadResult {
   preview: PreviewRow[];
   row_count: number;
   status: string;
+  /** Backend's alias-based guess at which header means which field. */
+  suggested_map?: Record<string, string>;
+  /** 0-based file row the headers came from (0 for a well-formed export). */
+  header_row?: number;
+  /** Title/date-range lines above the header, already skipped. */
+  preamble_rows?: number;
 }
 
 interface MappingResult {
   mapped_rows: number;
   error_count: number;
   errors: Array<{ row_index: number; field?: string | null; message: string }>;
+  /** Rows that were never data (TOTAL footers, blanks, "n/a"). */
+  skipped_count?: number;
+  skipped?: Array<{ row_index: number; reason: string }>;
+  status: string;
+}
+
+interface CommitResult {
+  committed: number;
+  reconciled: number;
+  skipped?: number;
+  failed?: number;
   status: string;
 }
 
@@ -77,6 +94,7 @@ export function ExcelCsvTab() {
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [rowCount, setRowCount] = useState(0);
+  const [preambleRows, setPreambleRows] = useState(0);
 
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<{ message: string; reference?: string | null; offline?: boolean } | null>(null);
@@ -125,6 +143,7 @@ export function ExcelCsvTab() {
     setDetectedHeaders([]);
     setPreviewRows([]);
     setRowCount(0);
+    setPreambleRows(0);
     setFileName(undefined);
     setMapping({ date: '', demand_qty: '', location: '', notes: '' });
     setMappingResult(null);
@@ -155,6 +174,19 @@ export function ExcelCsvTab() {
       setDetectedHeaders(res.detected_headers ?? []);
       setPreviewRows(res.preview ?? []);
       setRowCount(res.row_count ?? 0);
+      setPreambleRows(res.preamble_rows ?? 0);
+      // The backend matches headers against a vocabulary of the words real logs
+      // use ("Visitors (adults)", "No. of guests", "Covers"), which a lowercase
+      // substring match here cannot. Fall back to the old guess only for a
+      // backend that does not send one.
+      if (res.suggested_map) {
+        setMapping({
+          date: res.suggested_map.date ?? '',
+          demand_qty: res.suggested_map.demand_qty ?? '',
+          location: res.suggested_map.location ?? '',
+          notes: res.suggested_map.notes ?? '',
+        });
+      }
       // auto-populate mapping guesses if headers match common names
       const lowerHeaders = (res.detected_headers ?? []).map((h) => h.toLowerCase());
       const guess = (candidates: string[]) => {
@@ -164,13 +196,21 @@ export function ExcelCsvTab() {
         }
         return '';
       };
-      setMapping({
-        date: guess(['date']),
-        demand_qty: guess(['demand', 'visitor', 'covers', 'qty']),
-        location: guess(['location', 'site', 'store']),
-        notes: guess(['note', 'comment'])
-      });
-      toast(`${file.name} parsed. Check the column mapping.`);
+      setMapping((current) =>
+        current.date && current.demand_qty
+          ? current
+          : {
+              date: current.date || guess(['date']),
+              demand_qty: current.demand_qty || guess(['demand', 'visitor', 'covers', 'qty']),
+              location: current.location || guess(['location', 'site', 'store']),
+              notes: current.notes || guess(['note', 'comment'])
+            }
+      );
+      toast(
+        (res.preamble_rows ?? 0) > 0
+          ? `${file.name} parsed. Skipped ${res.preamble_rows} title line(s) above the table.`
+          : `${file.name} parsed. Check the column mapping.`
+      );
     } catch (e: unknown) {
       if (e instanceof ApiException) {
         const offline = e.error.message.toLowerCase().includes('failed to fetch') || e.status === 0;
@@ -256,10 +296,16 @@ export function ExcelCsvTab() {
     const committedId = uploadId;
     const committedName = fileName ?? 'the imported file';
     try {
-      const res = await api.post<{ committed: number; reconciled: number; status: string }>(
-        `/api/v1/ingest/file/${uploadId}/commit`
+      const res = await api.post<CommitResult>(`/api/v1/ingest/file/${uploadId}/commit`);
+      const left = [
+        res.skipped ? `${res.skipped} skipped` : null,
+        res.failed ? `${res.failed} could not be read` : null,
+      ].filter(Boolean);
+      toast(
+        `Import committed: ${res.committed} rows added (${res.reconciled} reconciled)` +
+          (left.length > 0 ? ` · ${left.join(' · ')}` : '.') +
+          (res.failed ? ' — see the import for the rows left out.' : '')
       );
-      toast(`Import committed: ${res.committed} rows added (${res.reconciled} reconciled).`);
       reset();
       setConfirmOpen(false);
       await traceImport(committedId, committedName);
@@ -278,7 +324,11 @@ export function ExcelCsvTab() {
   };
 
   const canMap = Boolean(uploadId && mapping.date && mapping.demand_qty);
-  const canCommit = Boolean(mappingResult && mappingResult.error_count === 0 && uploadId);
+  // Any importable day is enough. Demanding `error_count === 0` meant one
+  // unreadable footer row made a whole month's file uncommittable, which is how
+  // real logbooks (totals, "n/a" weeks, a signature line) ended up imported
+  // nowhere at all. Broken rows are named next to the counts instead.
+  const canCommit = Boolean(mappingResult && mappingResult.mapped_rows > 0 && uploadId);
 
   const downloadTemplate = () => {
     const headers = ['date', 'demand_qty', 'location', 'notes'];
@@ -314,7 +364,7 @@ export function ExcelCsvTab() {
 
       <section
         aria-labelledby="upload-spreadsheet-heading"
-        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5"
       >
         <h2 id="upload-spreadsheet-heading" className="flex items-center gap-2.5 text-h3 font-bold tracking-tight text-slate-900">
           <UploadCloudIcon className="h-5 w-5 text-brand-600" strokeWidth={2} />
@@ -390,6 +440,11 @@ export function ExcelCsvTab() {
               Detected headers: <span className="font-mono text-slate-800">{detectedHeaders.join(', ')}</span>
             </p>
             <p className="text-caption text-slate-500">{rowCount} rows · {previewRows.length} preview shown</p>
+            {preambleRows > 0 && (
+              <p className="text-caption text-slate-500">
+                Skipped {preambleRows} title line{preambleRows === 1 ? '' : 's'} above the table.
+              </p>
+            )}
           </div>
         )}
 
@@ -415,7 +470,7 @@ export function ExcelCsvTab() {
 
       <section
         aria-labelledby="preview-mapping-heading"
-        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+        className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5"
       >
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <h2 id="preview-mapping-heading" className="flex items-center gap-2.5 text-h3 font-bold tracking-tight text-slate-900">
@@ -574,6 +629,11 @@ export function ExcelCsvTab() {
             <p className="text-body-xs font-medium text-slate-800">
               Mapped {mappingResult.mapped_rows} row(s), {mappingResult.error_count} error(s)
             </p>
+            {(mappingResult.skipped_count ?? 0) > 0 && (
+              <p className="mt-0.5 text-caption text-slate-500">
+                {mappingResult.skipped_count} line(s) skipped as not-data (totals, blanks, “n/a”).
+              </p>
+            )}
             {mappingResult.errors.length > 0 && (
               <ul className="mt-2 flex flex-col gap-1">
                 {mappingResult.errors.map((e, i) => (
@@ -652,9 +712,23 @@ export function ExcelCsvTab() {
             ))}
         </ul>
         <p className="mt-3 text-caption leading-relaxed text-slate-500">
-          {mappingResult ? `${mappingResult.mapped_rows} rows will be added. Days that already exist are reconciled, never double counted.` : 'Validate mapping first.'}
+          {mappingResult
+            ? `${mappingResult.mapped_rows} rows will be added. Days that already exist are reconciled, never double counted.`
+            : 'Validate mapping first.'}
         </p>
-        {canCommit ? null : <p className="mt-2 text-caption text-amber-600">Fix mapping errors before committing.</p>}
+        {mappingResult && mappingResult.error_count > 0 && (
+          <p className="mt-2 text-caption text-amber-600">
+            {mappingResult.error_count} row(s) cannot be read and will be left out. The importable rows
+            still go in; the rejected ones are listed above.
+          </p>
+        )}
+        {mappingResult && (mappingResult.skipped_count ?? 0) > 0 && (
+          <p className="mt-2 text-caption text-slate-500">
+            {mappingResult.skipped_count} line(s) skipped: totals, blank rows and “n/a” cells are not
+            imported as service days.
+          </p>
+        )}
+        {canCommit ? null : <p className="mt-2 text-caption text-amber-600">Map the date and visitor columns, then validate to import.</p>}
       </Modal>
 
       {/*
@@ -665,7 +739,7 @@ export function ExcelCsvTab() {
       {trace && (
         <section
           aria-labelledby="import-trace-heading"
-          className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+          className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5"
         >
           <h2
             id="import-trace-heading"

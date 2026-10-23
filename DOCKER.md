@@ -175,7 +175,7 @@ when no bundle is present. For real LightGBM inference:
 
 ```bash
 # export a bundle first, if you have not:  make bundle
-BACKEND_EXTRAS=model docker compose build backend
+BACKEND_EXTRAS="ocr model" docker compose build backend
 docker compose up -d
 ```
 
@@ -196,13 +196,16 @@ waits on `backend: condition: service_healthy`, the web tier does not come up
 to serve it. `docker compose ps` shows the unhealthy service, and the
 `/api/v1/health` response says which mode it is in.
 
-`BACKEND_EXTRAS=ocr` adds pytesseract/Pillow **and** the Tesseract system
-packages (`tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-osd`) to the
-runtime image. The Python wrapper alone is not an OCR engine: without the
-binary, every photo honestly returns zero rows with a "no engine configured"
-note. Set `OCR_LANGUAGE` to match an installed language pack; the default `eng`
-is installed above. `OCR_SERVICE_URL` remains the alternative for a hosted
-vision service and bypasses the local binary.
+The `ocr` extra adds pytesseract/Pillow **and** the Tesseract system packages
+(`tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-osd`) to the runtime
+image. It is **on by default** (`INSTALL_EXTRAS: ${BACKEND_EXTRAS:-ocr}`) because
+the Python wrapper alone is not an OCR engine: without the binary, every photo
+honestly returns zero rows with a "no engine configured" note, which on a stock
+`make docker-up` made photo ingestion look broken. Set `OCR_LANGUAGE` to match
+an installed language pack; the default `eng` is installed above.
+`OCR_SERVICE_URL` remains the alternative for a hosted vision service and
+bypasses the local binary. Add `model` alongside it for real serving:
+`BACKEND_EXTRAS="ocr model"`.
 
 Uploads and datasets live in Postgres, not on the container filesystem, so
 neither needs a volume.

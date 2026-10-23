@@ -63,14 +63,14 @@ export function EmptyState({
       role="status"
       className={[
       'flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 text-center dark:border-slate-700',
-      isCompact ? 'px-4 py-6' : 'px-5 py-10 sm:px-8 sm:py-14',
+      isCompact ? 'px-4 py-5' : 'px-4 py-7 sm:px-6 sm:py-10',
       className].
       join(' ')}>
       
       <Art
         className={[
         'w-auto max-w-full',
-        isCompact ? 'h-[68px]' : 'h-[92px] sm:h-[112px]',
+        isCompact ? 'h-[60px]' : 'h-[76px] sm:h-[92px]',
         tone[variant]].
         join(' ')} />
       

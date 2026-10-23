@@ -119,7 +119,7 @@ export function PipelineHealth(){
         <CalendarClock size="md" showML={true} />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-2.5 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           {failing.length>0 && <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
             <AlertTriangleIcon className="h-4 w-4 shrink-0 text-red-600" strokeWidth={2} aria-hidden="true" />
