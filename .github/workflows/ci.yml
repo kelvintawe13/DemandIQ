@@ -1,0 +1,224 @@
+# DemandIQ — continuous integration.
+#
+# On every push this answers four questions that a local run can get wrong:
+#
+#   1. Does the backend test suite still pass on a clean Linux checkout?
+#      The suite is hermetic by design (backend/tests/conftest.py pins Redis, the
+#      trained bundle and the Turnstile/Google credentials OFF), so it needs no
+#      services here — no Postgres, no Redis, no .env.
+#   2. Do the images Railway actually deploys still build?
+#      Both are built from the same Dockerfiles the platform uses, with the same
+#      build arguments, so a broken COPY, a missing dependency or a Dockerfile
+#      edit that only worked because of a stale local layer fails here instead of
+#      on the deploy.
+#   3. Does the front end still typecheck and pass its tests?
+#   4. Do the Postgres-backed suites still pass against a real, migrated schema?
+#      These are the ones the hermetic suite cannot cover: the mocked session hid
+#      the JSONB mapping bug that `ingest_e2e.sh` exists to catch.
+#
+# Deliberately NOT here: the model pipeline (model/ is heavy and its leakage gate
+# needs the training run) and docker-lint. Both stay `make verify` targets, so a
+# push does not spend ten minutes re-proving them.
+#
+# Deployed behaviour is a separate workflow: `.github/workflows/smoke.yml`
+# smokes the live Railway URL after this one succeeds.
+
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+# A push that supersedes another push on the same ref has nothing to prove.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # 3.11 is the declared floor in backend/pyproject.toml ("requires-python"),
+      # and the version both images run. Testing a different minor than the
+      # deployed one would make a green suite mean less than it looks.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # Same extras as `make install-backend`: [dev] for pytest/ruff, [model] for
+      # lightgbm/pandas/joblib. Without [model] the tests that load a real serving
+      # bundle would import-skip and the suite would pass while proving less.
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "backend[dev,model]"
+
+      # Run from backend/, as `make test-backend` does: alembic.ini, migrations/
+      # and the tests' relative paths all assume that working directory.
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend tests and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # `playwright` is a frontend devDependency, so `npm ci` would otherwise
+      # download ~500 MB of browser binaries that no unit test touches. The
+      # bundle build and the e2e suites fetch what they need themselves.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # Node 20 matches frontend/Dockerfile (node:20-alpine), so a version skew
+      # between CI and the shipped image cannot hide behind a green run.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Dependencies are an npm workspace hoisted to the root lockfile; there is
+      # no frontend/package-lock.json, so this has to run at the repository root.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # `npm test` is `vitest run` (never watch mode), so it exits on its own.
+      - name: Run vitest
+        run: npm test --workspace=frontend
+
+      # vite does not typecheck; this is the only gate on the TypeScript types.
+      - name: Typecheck
+        run: npm run typecheck --workspace=frontend
+
+  integration:
+    name: Postgres integration suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      # The suites boot their own throwaway cluster and use this interpreter.
+      AUTH_E2E_PYTHON: python
+      INGEST_E2E_PYTHON: python
+      # Optional credentials. Their absence is not a failure: auth_e2e.sh runs
+      # its dev-safe phase regardless and reports which phases it skipped.
+      # TURNSTILE_SECRET / GOOGLE_OAUTH_CLIENT_ID are public/service-side values
+      # for the live accounts; add them as repository secrets to widen coverage.
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "backend[dev,model]"
+
+      # The suites initialise a disposable cluster with initdb/pg_ctl rather
+      # than talking to a service container, so the SERVER package has to be
+      # present — a client-only install lacks initdb and they exit early with a
+      # clear message. auth_e2e.sh also uses `lsof` to refuse a stale server
+      # squatting on its ports; the runner ships it, but installing it keeps the
+      # job independent of the image's package list.
+      - name: Install PostgreSQL server binaries
+        run: |
+          # Explicitly non-interactive: the server package asks debconf questions
+          # about cluster creation, and a prompt in CI is a hung job, not a slow
+          # one. `sudo` does not forward DEBIAN_FRONTEND on its own.
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql lsof
+          pg_bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)"
+          [ -x "$pg_bin/initdb" ] || { echo "::error::initdb not found in $pg_bin"; exit 1; }
+          echo "AUTH_E2E_PG_BIN=$pg_bin" >> "$GITHUB_ENV"
+          echo "INGEST_E2E_PG_BIN=$pg_bin" >> "$GITHUB_ENV"
+          "$pg_bin/postgres" --version
+
+      # Only when the credential exists: phase 3 (Google audience + profile
+      # gate) needs it, and requiring it unconditionally would leave a fresh
+      # clone with a permanently red job. Once the secret is set, a later break
+      # in that phase fails the job instead of silently skipping.
+      - name: Require the Google sign-in phase when its client id is configured
+        if: env.GOOGLE_OAUTH_CLIENT_ID != ''
+        run: echo "AUTH_E2E_REQUIRE_PHASES=3" >> "$GITHUB_ENV"
+
+      - name: Auth end-to-end (migrations + real HTTP)
+        run: bash backend/scripts/auth_e2e.sh
+
+      - name: Ingestion end-to-end (upload -> mapping -> commit)
+        run: bash backend/scripts/ingest_e2e.sh
+
+  images:
+    name: Build ${{ matrix.image }} image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Both images are independent: a frontend break should not hide an API break,
+    # and fail-fast would cancel the second build for no benefit.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The API service on Railway: build context backend/, with the extras
+          # the deployment sets as service variables (Railway passes them as
+          # build arguments because the Dockerfile declares them with ARG).
+          # `model` gives lightgbm/joblib for the serving bundle; `ocr` also
+          # installs the tesseract-ocr OS packages in the runtime stage.
+          - image: api
+            context: backend
+            file: backend/Dockerfile
+            build-args: |
+              INSTALL_EXTRAS=model ocr
+
+          # The web service: repo-root context (the npm workspace lockfile lives
+          # there), Railway nginx entrypoint instead of the compose one.
+          - image: web
+            context: .
+            file: frontend/Dockerfile.railway
+            build-args: ""
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Build only: nothing is pushed, so no registry credentials are needed and
+      # this works unchanged on a fork. The GHA cache is scoped per image, so the
+      # 400 MB dependency layer of one build cannot evict the other's.
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
