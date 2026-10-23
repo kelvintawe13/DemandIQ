@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1
+#
+# DemandIQ frontend — Railway image.
+#
+# Same build stage as frontend/Dockerfile, different runtime: Railway gives
+# every service a PORT and its own private DNS, so the compose nginx config
+# (which hardcodes listen 8080, `proxy_pass http://backend:8000` and Docker's
+# 127.0.0.11 resolver) cannot be used there. See frontend/nginx.railway.conf.template.
+#
+# Build context is the REPOSITORY ROOT, like the compose image: dependencies are
+# an npm workspace hoisted to the root lockfile, so there is no
+# frontend/package-lock.json to install from. The root .dockerignore is what
+# keeps that context to a few MB instead of ~1.7 GB.
+#
+# Local check:
+#   docker build -f frontend/Dockerfile.railway -t demandiq-frontend:railway .
+#   docker run --rm -p 8080:8080 demandiq-frontend:railway
+
+# ---------------------------------------------------------------------------
+# Build stage
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS build
+
+WORKDIR /src
+
+# `playwright` is a frontend devDependency, so `npm ci` would run its postinstall
+# and download ~500 MB of browser binaries into the layer. Nothing in a bundle
+# build needs them.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+COPY package.json package-lock.json ./
+COPY frontend/package.json ./frontend/package.json
+COPY shared/package.json ./shared/package.json
+
+# `npm ci`, not `npm install`: exactly the lockfile, or fail.
+RUN npm ci --no-audit --no-fund
+
+COPY shared ./shared
+COPY frontend ./frontend
+
+# ---------------------------------------------------------------------------
+# Build-time configuration.
+#
+# VITE_API_URL must stay EMPTY here. The SPA then calls /api/v1/... on its own
+# origin, and nginx proxies that to the API service, so the browser is
+# same-origin: no CORS preflight, and no second origin to keep in sync when a
+# Railway domain changes.
+#
+# Set it to an absolute URL only if you decide to drop the proxy — and then that
+# origin has to be in the backend's CORS_ORIGINS, and the Turnstile/Google
+# origins in those dashboards must include this site's origin too.
+#
+# Railway passes service variables as build arguments when the Dockerfile
+# declares them, which is why these are ARGs as well as ENVs.
+# ---------------------------------------------------------------------------
+ARG VITE_API_URL=""
+ARG VITE_TURNSTILE_SITE_KEY=""
+ARG VITE_GOOGLE_CLIENT_ID=""
+ENV VITE_API_URL=${VITE_API_URL} \
+    VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY} \
+    VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+
+# vite.config.ts pins `base` to '/app/' for production builds, so the bundle
+# expects to be served under /app/ — same path the backend's _SpaStaticFiles
+# mount uses when the API serves the bundle itself.
+RUN npm run build --workspace=frontend
+
+# ---------------------------------------------------------------------------
+# Runtime stage — nginx, unprivileged.
+# ---------------------------------------------------------------------------
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+
+LABEL org.opencontainers.image.title="DemandIQ frontend" \
+      org.opencontainers.image.description="Static SPA bundle + reverse proxy to the DemandIQ API (Railway)"
+
+# The SPA lives under /app/ to match the bundle's compiled base path.
+COPY --from=build /src/frontend/dist /usr/share/nginx/html/app
+
+# The template is rendered into /etc/nginx/conf.d/default.conf at start-up,
+# replacing the base image's stock config.
+COPY frontend/nginx.railway.conf.template /etc/nginx/railway/nginx.conf.template
+COPY --chmod=0755 frontend/entrypoint.railway.sh /usr/local/bin/railway-entrypoint.sh
+
+# 8080 matches the base image's convention and the local default in the
+# entrypoint; Railway overrides it with its injected PORT.
+ENV PORT=8080 \
+    API_UPSTREAM=api.railway.internal:8000
+EXPOSE 8080
+
+# Shell form so ${PORT} expands. Railway runs its own healthcheck against the
+# configured path and ignores this one, but it keeps `docker run` honest.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/healthz" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/railway-entrypoint.sh"]

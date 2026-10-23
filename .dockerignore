@@ -1,0 +1,58 @@
+# Root build context exclusions.
+#
+# frontend/Dockerfile and frontend/Dockerfile.railway both build from the
+# REPOSITORY ROOT, because frontend/ has no package-lock.json of its own —
+# dependencies are an npm workspace hoisted to the root lockfile. Without this
+# file the "few MB" context the frontend Dockerfile assumes is a lie: model/ is
+# ~943 MB, and a dev machine's node_modules adds another few hundred. That is
+# uploaded to the builder on every deploy, on Docker Desktop and on Railway
+# alike.
+#
+# The only things a frontend build needs are the two manifests, frontend/ and
+# shared/. Everything else is excluded below.
+#
+# backend/ is excluded too: it has its own Dockerfile and its own
+# backend/.dockerignore, and its build context is backend/, never the root.
+
+# --- VCS / editor noise -----------------------------------------------------
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# --- Python service and its tests (separate build context) ------------------
+backend
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/htmlcov
+**/.coverage
+
+# --- Training data, notebooks and exported artifacts ------------------------
+# 943 MB of datasets, notebooks and runs. Nothing in the SPA bundle reads it.
+model
+
+# --- SQL fixtures, screenshots, local scripting -----------------------------
+database
+docs
+scripts
+locustfile.py
+
+# --- Node installs and build residue ---------------------------------------
+# The image runs `npm ci` itself; a host node_modules is the wrong platform and
+# would be copied over the freshly installed one.
+**/node_modules
+frontend/dist
+**/.vite
+**/playwright-report
+**/test-results
+npm-debug.log*
+
+# --- Compose / docs not needed in a build context ---------------------------
+docker-compose.yml
+Dockerfile
+Makefile
+*.md
+!frontend/*.md
