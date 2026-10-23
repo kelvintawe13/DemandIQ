@@ -59,11 +59,15 @@ fold 2  train ──────────────────┤ test ─
 fold 3  train ──────────────────────────┤ test ──┤
 ```
 
-Expanding-origin folds inside the training period select hyperparameters.
+The validation tail of the training period selects hyperparameters; expanding-origin
+folds are used for evaluation, not selection.
 
-*(Implemented: hyperparameters are fixed, documented defaults; early stopping
-uses the tail of the training window, and the six-fold rolling-origin backtest
-is opt-in **evaluation**, not selection. See [PIPELINE.md §6–§7](PIPELINE.md).)*
+*(Implemented: a bounded eight-configuration search scored on the validation
+tail — the last 10% of the training window — selects the LightGBM
+hyperparameters; trial 0 is the documented default, and every trial is
+persisted. Early stopping uses the same tail. The six-fold rolling-origin
+backtest is opt-in **evaluation**, not selection. See [PIPELINE.md
+§6–§7](PIPELINE.md).)*
 
 A final held-out window, untouched during development, produces the numbers that
 appear in the registry. That window is never used for feature selection, tuning,

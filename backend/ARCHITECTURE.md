@@ -30,7 +30,7 @@ Six inbound channels exist, and they all resolve to the same row:
 | POS connector | OAuth + polling | Group transactions by service day, drop refunds and voids, count covers |
 | Mobile money | Webhook | Same grouping; payer identity is discarded at the edge |
 | Spreadsheet | Upload | Sniff delimiter and encoding, parse dates, apply the user's column mapping |
-| Handwritten photo | Upload | OCR to candidate rows, always human-confirmed before commit |
+| Handwritten photo | Upload | Validate/decode, orient and normalise, OCR (remote service or local Tesseract) to candidate rows, always human-confirmed before commit |
 | Manual entry | REST | Direct, still validated |
 | SMS / USSD | Gateway | Parse `DATE COVERS` shorthand, reply with a confirmation |
 

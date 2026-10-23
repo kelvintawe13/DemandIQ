@@ -122,6 +122,16 @@ the upload id is gone from state. A commit that reconciled every day wrote no ne
 rows, which is reported as exactly that rather than as an empty table; and a
 failed read is reported as a failure, not as "nothing was written".
 
+## OCR upload and engine quality
+
+The upload is checked by content, not by its filename or the browser's MIME
+type: `POST /ingest/image` returns **400 `invalid_image`** for a non-image or an
+image above the pixel budget. The local engine applies EXIF orientation,
+contrast normalisation and a conservative upscale, then tries Tesseract's
+uniform-block, column and sparse page-segmentation modes. `GET
+/ingest/image/{job_id}` reports the chosen mode and the measured mean word
+confidence under `quality`, separately from each row's line-legibility score.
+
 ## OCR row scores (`../../PreviewPanel.tsx`)
 
 The photo review lists each row's `confidence`, worded for the engine that

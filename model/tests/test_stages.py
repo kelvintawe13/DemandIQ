@@ -35,7 +35,7 @@ def test_stage_features_and_lightgbm_end_to_end(recruit_csvs, visits_df, tmp_pat
     results = run_pipeline(store, recruit_csvs, test_start="2016-02-15", strict=False)
 
     assert set(results) == {
-        "ingest", "baseline", "features", "fallbacks", "lightgbm", "catboost",
+        "ingest", "baseline", "features", "tune", "fallbacks", "lightgbm", "catboost",
         "conformal", "policy", "shap",
     }
     feats = results["features"]
@@ -72,6 +72,14 @@ def test_stage_features_and_lightgbm_end_to_end(recruit_csvs, visits_df, tmp_pat
         assert entry["status"] == "candidate"
         assert entry["metrics"]["mae"] == fallbacks["fallbacks"][name]["mae"]
         assert entry["metrics"]["mae_delta_vs_production"] is not None
+
+    # The bounded search's trials and selection travel with the bundle the API
+    # publishes; the notebook asserts this contract before writing the file.
+    tuning = bundle["tuning"]
+    assert tuning["best_trial"] == results["tune"]["best_trial"]
+    assert len(tuning["trials"]) == results["tune"]["max_trials"]
+    assert sum(t["selected"] for t in tuning["trials"]) == 1
+    assert tuning["best_params"]["learning_rate"] == results["tune"]["best_params"]["learning_rate"]
     # Round-trip: the bundle the API loads still describes all three families.
     assert set(comparison) >= {"catboost", *fallbacks["fallbacks"]}
     assert joblib.load(store.root / "lightgbm_model.joblib") is not None
@@ -150,7 +158,7 @@ def test_stage_sensitivity_ablates_each_feature_group(recruit_csvs, tmp_path):
 
 
 def test_sensitivity_is_opt_in(recruit_csvs, tmp_path, capsys):
-    """The default run stays the nine stages; the ablation is a --with-sensitivity
+    """The default run stays the ten stages; the ablation is a --with-sensitivity
     stage because it refits the primary model once per subset."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("pyarrow")
@@ -182,4 +190,4 @@ def test_stage_resume_skips_lightgbm(recruit_csvs, tmp_path, capsys):
     run_pipeline(store, recruit_csvs, test_start="2016-02-15", strict=False)
     run_pipeline(store, recruit_csvs, test_start="2016-02-15", strict=False)
     out = capsys.readouterr().out
-    assert out.count("[skip]") == 9, "second run must skip all nine stages"
+    assert out.count("[skip]") == 10, "second run must skip all ten stages"

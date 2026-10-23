@@ -15,7 +15,7 @@ import { GoogleButton } from '../../components/auth/GoogleButton';
 import { isGoogleConfigured } from '../../lib/google';
 import { Rise } from '../../components/ui/Rise';
 import { DashboardArt } from '../../components/illustrations/AuthArt';
-import { findDemoAccount } from '../../data/demoAccount';
+import { demoAccounts, findDemoAccount } from '../../data/demoAccount';
 import type { DemoAccount } from '../../data/demoAccount';
 import { api, ApiException, setToken } from '../../api/client';
 import { useToast } from '../../contexts/ToastContext';
@@ -103,8 +103,7 @@ export function SignIn({
     });
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const signIn = async (loginEmail: string, loginPassword: string) => {
     setGeneralError(undefined);
     setReference(undefined);
     setFieldErrors({});
@@ -112,8 +111,8 @@ export function SignIn({
 
     // basic client validation first; don't gate on captcha when fields are empty
     const fieldErrs: { email?: string; password?: string } = {};
-    if (!email.trim()) fieldErrs.email = 'Enter your email.';
-    if (!password) fieldErrs.password = 'Enter your password.';
+    if (!loginEmail.trim()) fieldErrs.email = 'Enter your email.';
+    if (!loginPassword) fieldErrs.password = 'Enter your password.';
     if (Object.keys(fieldErrs).length) {
       setFieldErrors(fieldErrs);
       return;
@@ -136,8 +135,8 @@ export function SignIn({
         challenge_id?: string;
         needs_profile?: boolean;
       }>('/api/v1/auth/login', {
-        email: email.trim(),
-        password,
+        email: loginEmail.trim(),
+        password: loginPassword,
         turnstile_token: captchaToken,
       });
 
@@ -146,16 +145,16 @@ export function SignIn({
         const challengeId = (res as any).challenge_id as string;
         try {
           localStorage.setItem('demandiq_mfa_challenge', challengeId);
-          localStorage.setItem('demandiq_mfa_email', email.trim().toLowerCase());
+          localStorage.setItem('demandiq_mfa_email', loginEmail.trim().toLowerCase());
         } catch {}
         toast('Two-factor required. Enter your code.', 'info');
-        const demo = findDemoAccount(email, password) ?? ({
+        const demo = findDemoAccount(loginEmail, loginPassword) ?? ({
           id: 'admin',
-          email: email.trim().toLowerCase(),
-          password,
-          name: email.split('@')[0],
+          email: loginEmail.trim().toLowerCase(),
+          password: loginPassword,
+          name: loginEmail.split('@')[0],
           role: 'Administrator',
-          initials: email.slice(0, 2).toUpperCase(),
+          initials: loginEmail.slice(0, 2).toUpperCase(),
           label: 'MFA demo',
           blurb: 'Requires second factor',
           home: 'admin-models',
@@ -174,7 +173,7 @@ export function SignIn({
         if (res.needs_profile) {
           onCompleteProfile?.({
             id: 'clerk',
-            email: res.user?.email ?? email,
+            email: res.user?.email ?? loginEmail,
             password: '',
             name: res.user?.name ?? '',
             role: 'Data Clerk',
@@ -208,12 +207,12 @@ export function SignIn({
         // pick DemoAccount for App routing (keeps existing navigation contract)
         const roleRaw = (res.user?.role as string | undefined) ?? 'operator';
         const isAdmin = ['owner', 'administrator'].includes(roleRaw.toLowerCase());
-        const found = findDemoAccount(email, password);
+        const found = findDemoAccount(loginEmail, loginPassword);
         let account: DemoAccount;
         if (found) {
           account = found;
         } else {
-          const name = res.user?.name ?? email.split('@')[0];
+          const name = res.user?.name ?? loginEmail.split('@')[0];
           const initials = name
             .trim()
             .split(/\s+/)
@@ -223,8 +222,8 @@ export function SignIn({
             .toUpperCase() || 'U';
           account = {
             id: isAdmin ? 'admin' : 'clerk',
-            email: email.trim().toLowerCase(),
-            password,
+            email: loginEmail.trim().toLowerCase(),
+            password: loginPassword,
             name,
             role: isAdmin ? 'Administrator' : 'Data Clerk',
             initials,
@@ -264,6 +263,29 @@ export function SignIn({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void signIn(email, password);
+  };
+
+  const adminSeat = demoAccounts.find((account) => account.id === 'admin');
+
+  const handleAdminQuickFill = () => {
+    if (!adminSeat) return;
+    setEmail(adminSeat.email);
+    setPassword(adminSeat.password);
+    setFieldErrors({});
+    setGeneralError(undefined);
+    setReference(undefined);
+    // A captcha cannot be completed programmatically, so fill the fields and
+    // let the person finish the check instead of sending a login that 401s.
+    if (isTurnstileEnabled() && !captchaToken) {
+      setCaptchaError('Complete the human check to continue.');
+      return;
+    }
+    void signIn(adminSeat.email, adminSeat.password);
   };
 
   return (
@@ -386,6 +408,19 @@ export function SignIn({
           {loading ? 'Signing in…' : 'Sign In'}
           {!loading && <ArrowRightIcon className="h-4 w-4" strokeWidth={2} />}
         </button>
+
+        <div className="flex items-center justify-center gap-1.5 text-micro text-slate-500">
+          <span>Quick fill</span>
+          <button
+            type="button"
+            onClick={handleAdminQuickFill}
+            disabled={loading}
+            title="Sign in with the admin account"
+            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700 transition-colors duration-150 ease-out hover:border-brand-300 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
+            
+            admin
+          </button>
+        </div>
       </form>
       </Rise>
 

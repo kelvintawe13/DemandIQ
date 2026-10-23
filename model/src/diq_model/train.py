@@ -10,6 +10,8 @@ Stage map (MODEL_LIFECYCLE.md):
     ingest      load + audit Recruit                -> row/store counts
     baseline    day-of-week historical average      -> MAE, RMSE, RMSLE
     features    leakage-safe feature build          -> rows, features, version
+    tune        bounded LightGBM search on the      -> trials, selected config
+                validation tail (never the test window)
     fallbacks   linear/RF/XGBoost vs primaries      -> MAE, RMSE, RMSLE
     lightgbm    primary model vs baseline           -> MAE, RMSE, RMSLE, lift
     catboost    secondary primary vs lightgbm       -> MAE, RMSE, RMSLE, delta
@@ -54,6 +56,7 @@ from diq_model.models.baselines import (
 )
 from diq_model.models.catboost_model import CatBoostModel
 from diq_model.models.lightgbm_model import LightGBMModel
+from diq_model.models.search import DEFAULT_MAX_TRIALS
 from diq_model.policy.simulate import (
     DEFAULT_RISK_WEIGHT,
     Policy,
@@ -232,6 +235,128 @@ def stage_features(store: CheckpointStore, seed: int, test_start: str) -> dict:
     }
 
 
+def stage_tune(
+    store: CheckpointStore,
+    seed: int,
+    test_start: str,
+    max_trials: int = DEFAULT_MAX_TRIALS,
+) -> dict:
+    """Search LightGBM hyperparameters on the validation tail (Sections 3.14/3.25).
+
+    The split matches ``stage_lightgbm`` exactly: the final 10% of the TRAIN
+    window is the only frame scored here. The held-out test window is not read,
+    so the choice cannot leak into the reported metrics. Every trial is
+    persisted (``tuning_trials.parquet``) and the winner plus the default
+    configuration's score in ``tuning_best.joblib``; ``stage_lightgbm`` then
+    trains with that winner, which keeps one model per run and no refit on the
+    test window.
+    """
+    from diq_model.models.search import search_lightgbm
+
+    fframe = load_feature_frame(store)
+    df = fframe.frame
+    split = pd.Timestamp(test_start)
+
+    train_df = df[df["visit_date"] < split]
+    if train_df.empty:
+        raise SystemExit(f"Empty train split at {test_start!r}; check --test-start.")
+
+    cutoff = train_df["visit_date"].quantile(0.9)
+    fit_df = train_df[train_df["visit_date"] < cutoff]
+    valid_df = train_df[train_df["visit_date"] >= cutoff]
+
+    result = search_lightgbm(
+        fit_df,
+        valid_df,
+        fframe.feature_columns,
+        seed=seed,
+        max_trials=max_trials,
+    )
+
+    trials = pd.DataFrame(
+        [
+            {
+                "trial": t.trial,
+                "learning_rate": t.params.get("learning_rate"),
+                "num_leaves": t.params.get("num_leaves"),
+                "min_data_in_leaf": t.params.get("min_data_in_leaf"),
+                "feature_fraction": t.params.get("feature_fraction"),
+                "validation_mae": t.validation_mae,
+                "validation_rmse": t.validation_rmse,
+                "validation_rmsle": t.validation_rmsle,
+                "validation_mase": t.validation_mase,
+                "best_iteration": t.best_iteration,
+                "duration_s": t.duration_s,
+                "selected": t.selected,
+            }
+            for t in result.trials
+        ]
+    )
+    store.save_dataframe(trials, "tuning_trials.parquet")
+
+    payload = {
+        "selection_split": "validation_tail",
+        "selection_metric": result.selection_metric,
+        "max_trials": len(result.trials),
+        "best_trial": result.best_trial,
+        "best_params": result.best_params,
+        "default_validation_mae": result.default_mae,
+        "best_validation_mae": result.best.validation_mae,
+        "improvement": result.improvement,
+        "feature_set_version": fframe.feature_set_version,
+        "test_start": test_start,
+        "seed": seed,
+        "fit_rows": int(len(fit_df)),
+        "validation_rows": int(len(valid_df)),
+        "validation_start": str(valid_df["visit_date"].min().date()),
+        "validation_end": str(valid_df["visit_date"].max().date()),
+    }
+    store.save_object(payload, "tuning_best.joblib")
+
+    return {
+        "selection_split": payload["selection_split"],
+        "selection_metric": payload["selection_metric"],
+        "max_trials": payload["max_trials"],
+        "best_trial": payload["best_trial"],
+        "best_params": payload["best_params"],
+        "default_validation_mae": payload["default_validation_mae"],
+        "best_validation_mae": payload["best_validation_mae"],
+        "improvement": payload["improvement"],
+        "fit_rows": payload["fit_rows"],
+        "validation_rows": payload["validation_rows"],
+        "validation_start": payload["validation_start"],
+        "validation_end": payload["validation_end"],
+        "feature_set_version": payload["feature_set_version"],
+    }
+
+
+def _selected_tuning(
+    store: CheckpointStore,
+    feature_set_version: str,
+    test_start: str,
+    seed: int,
+    enabled: bool = True,
+) -> dict:
+    """The tune stage's selection, if it applies to this frame and split.
+
+    Returns ``{}`` when the stage did not run, or when its payload was produced
+    for another feature set, test window or seed. Refitting with a stale selection is
+    worse than falling back to the documented defaults, and the LightGBM
+    metrics record which happened via ``tuning_trial``.
+    """
+    if not enabled or not store.has("tuning_best.joblib"):
+        return {}
+    candidate = store.load_object("tuning_best.joblib")
+    if (
+        isinstance(candidate, dict)
+        and candidate.get("feature_set_version") in (None, feature_set_version)
+        and candidate.get("test_start") in (None, test_start)
+        and candidate.get("seed") in (None, seed)
+    ):
+        return candidate
+    return {}
+
+
 def stage_fallbacks(store: CheckpointStore, seed: int, test_start: str) -> dict:
     """Train the Section 3.13 fallback models on the primary feature frame.
 
@@ -287,7 +412,9 @@ def stage_fallbacks(store: CheckpointStore, seed: int, test_start: str) -> dict:
     }
 
 
-def stage_lightgbm(store: CheckpointStore, seed: int, test_start: str) -> dict:
+def stage_lightgbm(
+    store: CheckpointStore, seed: int, test_start: str, use_tuning: bool = True
+) -> dict:
     """Train LightGBM (Sections 3.13-3.14) and compare against the baseline.
 
     Chronological discipline: train on features before ``test_start``; the
@@ -310,7 +437,11 @@ def stage_lightgbm(store: CheckpointStore, seed: int, test_start: str) -> dict:
     fit_df = train_df[train_df["visit_date"] < cutoff]
     valid_df = train_df[train_df["visit_date"] >= cutoff]
 
-    model = LightGBMModel().fit(
+    # Use the configuration selected by the tune stage when it matches the
+    # installed feature set; otherwise the documented defaults, as before.
+    tuned = _selected_tuning(store, fframe.feature_set_version, test_start, seed, use_tuning)
+
+    model = LightGBMModel(params=tuned.get("best_params")).fit(
         fit_df,
         feature_columns=fframe.feature_columns,
         valid=valid_df,
@@ -360,6 +491,13 @@ def stage_lightgbm(store: CheckpointStore, seed: int, test_start: str) -> dict:
             "test_rows": len(test_df),
             "best_iteration": model.best_iteration_,
             "feature_set_version": fframe.feature_set_version,
+            # Provenance: which search trial produced the shipped config, and
+            # the validation score it beat. ``None`` when the tune stage did
+            # not run (e.g. --skip-tune), so the defaults are visible as such.
+            "tuning_trial": tuned.get("best_trial"),
+            "tuning_trials": tuned.get("max_trials"),
+            "tuning_validation_mae": tuned.get("best_validation_mae"),
+            "tuning_default_validation_mae": tuned.get("default_validation_mae"),
         }
     )
 
@@ -789,7 +927,9 @@ def stage_shap(store: CheckpointStore, seed: int, test_start: str) -> dict:
     }
 
 
-def stage_sensitivity(store: CheckpointStore, seed: int, test_start: str) -> dict:
+def stage_sensitivity(
+    store: CheckpointStore, seed: int, test_start: str, use_tuning: bool = True
+) -> dict:
     """Section 3.25 sensitivity to feature groups and reservation availability.
 
     The proposal commits to investigating the sensitivity of the results to
@@ -827,6 +967,9 @@ def stage_sensitivity(store: CheckpointStore, seed: int, test_start: str) -> dic
 
     full_columns = list(fframe.feature_columns)
     groups = [g for g in FEATURE_GROUPS if feature_columns_for_groups(full_columns, (g,))]
+    # Ablate around the configuration the run ships, so the marginal effect of
+    # a group is measured on the production model rather than a default one.
+    tuned = _selected_tuning(store, fframe.feature_set_version, test_start, seed, use_tuning)
 
     def score(columns: list[str]) -> dict[str, float]:
         if not columns:
@@ -835,7 +978,7 @@ def stage_sensitivity(store: CheckpointStore, seed: int, test_start: str) -> dic
         # (dropping `calendar` removes `dow`/`month`), and LightGBM rejects a
         # categorical name that is absent from the frame. Pass the intersection.
         categorical = [c for c in ("dow", "month") if c in set(columns)]
-        model = LightGBMModel().fit(
+        model = LightGBMModel(params=tuned.get("best_params")).fit(
             fit_df,
             feature_columns=columns,
             valid=valid_df,
@@ -952,6 +1095,7 @@ def stage_backtest(
     test_days: int = 30,
     advance_days: int = 14,
     min_train_days: int = 180,
+    use_tuning: bool = True,
 ) -> dict:
     """Rolling-origin backtest of LightGBM (Section 3.25 sensitivity).
 
@@ -981,7 +1125,12 @@ def stage_backtest(
         cutoff = train["visit_date"].quantile(0.9)
         fit_df = train[train["visit_date"] < cutoff]
         valid_df = train[train["visit_date"] >= cutoff]
-        model = LightGBMModel().fit(
+        # Score the configuration the run actually ships, not an untuned
+        # variant: the folds are the production model's evaluation.
+        tuned = _selected_tuning(
+            store, fframe.feature_set_version, test_start, seed, use_tuning
+        )
+        model = LightGBMModel(params=tuned.get("best_params")).fit(
             fit_df,
             feature_columns=fframe.feature_columns,
             valid=valid_df,
@@ -1041,19 +1190,23 @@ def run_pipeline(
     test_days: int = 30,
     advance_days: int = 14,
     min_train_days: int = 180,
+    tune_trials: int = DEFAULT_MAX_TRIALS,
+    use_tuning: bool = True,
 ) -> dict[str, dict]:
     """Run stages in order, skipping those already checkpointed.
 
     Returns the metrics of every completed stage, whether loaded from the
     checkpoint or freshly computed. ``strict`` is passed through to
     ``stage_ingest`` (see its docstring for the subset-run semantics);
-    ``n_folds``/``test_days``/``advance_days`` configure the backtest stage.
+    ``n_folds``/``test_days``/``advance_days`` configure the backtest stage and
+    ``tune_trials`` bounds the validation-tail search.
     """
     set_global_seed(seed)
     order = [
         "ingest",
         "baseline",
         "features",
+        "tune",
         "fallbacks",
         "lightgbm",
         "catboost",
@@ -1087,10 +1240,12 @@ def run_pipeline(
             metrics = stage_baseline(store, seed, test_start)
         elif stage == "features":
             metrics = stage_features(store, seed, test_start)
+        elif stage == "tune":
+            metrics = stage_tune(store, seed, test_start, max_trials=tune_trials)
         elif stage == "fallbacks":
             metrics = stage_fallbacks(store, seed, test_start)
         elif stage == "lightgbm":
-            metrics = stage_lightgbm(store, seed, test_start)
+            metrics = stage_lightgbm(store, seed, test_start, use_tuning=use_tuning)
         elif stage == "catboost":
             metrics = stage_catboost(store, seed, test_start)
         elif stage == "conformal":
@@ -1100,7 +1255,7 @@ def run_pipeline(
         elif stage == "shap":
             metrics = stage_shap(store, seed, test_start)
         elif stage == "sensitivity":
-            metrics = stage_sensitivity(store, seed, test_start)
+            metrics = stage_sensitivity(store, seed, test_start, use_tuning=use_tuning)
         elif stage == "backtest":
             metrics = stage_backtest(
                 store,
@@ -1110,6 +1265,7 @@ def run_pipeline(
                 test_days=test_days,
                 advance_days=advance_days,
                 min_train_days=min_train_days,
+                use_tuning=use_tuning,
             )
         else:  # pragma: no cover - guarded by the order list
             raise KeyError(stage)
@@ -1133,12 +1289,26 @@ def main(argv: list[str] | None = None) -> int:
     p_audit = sub.add_parser("audit", help="Run the Section 3.7.1 audit and exit")
     p_audit.add_argument("--data-root", required=True, help="Folder with the Recruit CSVs")
 
-    p_train = sub.add_parser("train", help="Full pipeline: ingest, baseline, features, lightgbm")
+    p_train = sub.add_parser(
+        "train", help="Full pipeline: ingest, baseline, features, tune, models"
+    )
     p_train.add_argument("--data-root", required=True)
     p_train.add_argument(
         "--skip-lightgbm",
         action="store_true",
         help="Stop after the features stage (implies no conformal/policy)",
+    )
+    p_train.add_argument(
+        "--skip-tune",
+        action="store_true",
+        help="Skip the bounded validation-tail search and train LightGBM "
+        "with the documented default hyperparameters",
+    )
+    p_train.add_argument(
+        "--tune-trials",
+        type=int,
+        default=DEFAULT_MAX_TRIALS,
+        help=f"Ceiling on tuning configurations evaluated (<= {DEFAULT_MAX_TRIALS})",
     )
     p_train.add_argument(
         "--with-sensitivity",
@@ -1189,7 +1359,10 @@ def main(argv: list[str] | None = None) -> int:
         print(report.summary())
         return 0 if report.ok else 1
 
-    stages = ["ingest", "baseline", "features", "fallbacks"]
+    stages = ["ingest", "baseline", "features"]
+    if not getattr(args, "skip_lightgbm", False) and not getattr(args, "skip_tune", False):
+        stages.append("tune")
+    stages.append("fallbacks")
     if not getattr(args, "skip_lightgbm", False):
         stages += ["lightgbm", "catboost", "conformal", "policy", "shap"]
     if getattr(args, "with_sensitivity", False):
@@ -1208,6 +1381,8 @@ def main(argv: list[str] | None = None) -> int:
         test_days=args.backtest_test_days,
         advance_days=args.backtest_advance_days,
         min_train_days=args.backtest_min_train_days,
+        tune_trials=args.tune_trials,
+        use_tuning=not args.skip_tune,
     )
     print("\nCompleted stages:", ", ".join(results) or "none")
     return 0

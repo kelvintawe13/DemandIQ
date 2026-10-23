@@ -103,6 +103,28 @@ class Settings(BaseSettings):
         ),
     )
     ocr_language: str = Field(default="eng", description="Tesseract language pack for local OCR")
+    ocr_psm_modes: str = Field(
+        default="6,4,11",
+        description=(
+            "Comma-separated Tesseract page-segmentation modes to try, in order "
+            "(6 = uniform block, 4 = columns, 11 = sparse text). The extraction "
+            "with the most rows wins; a mode that fails is skipped."
+        ),
+    )
+    ocr_max_pixels: int = Field(
+        default=25_000_000,
+        ge=1_000_000,
+        description=(
+            "Reject images above this pixel count before decoding/OCR, so a "
+            "small compressed file cannot expand into a decompression bomb."
+        ),
+    )
+    ocr_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+        description="Per-segmentation-mode timeout passed to pytesseract",
+    )
 
     # --- Misc ---
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])

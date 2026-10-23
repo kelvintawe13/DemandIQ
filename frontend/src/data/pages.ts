@@ -63,7 +63,7 @@ export const pageMeta: Record<string, PageMeta> = {
     subtitle: 'Upload or enter demand data from multiple sources.',
     icon: DownloadIcon,
     footerLeft: 'Secure upload · your data is encrypted and protected.',
-    footerRight: 'Supported dates: YYYY-MM-DD, MM/DD/YYYY, DD-MM-YYYY'
+    footerRight: 'Dates: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY · ambiguous dates default to day-first'
   },
   sources: {
     title: 'Sources',

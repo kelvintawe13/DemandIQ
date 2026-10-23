@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import io
 import uuid
@@ -654,6 +655,12 @@ def test_uploads_list_and_delete() -> None:
 
 # ---------------------------------------------------------------- image stub ---
 
+# A real 1x1 PNG. The upload route now validates the bytes, so the old
+# b"fake-image-bytes" payload is correctly rejected as a non-image.
+_ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+)
+
 
 def test_image_job_lifecycle() -> None:
     ws = _make_workspace()
@@ -689,7 +696,7 @@ def test_image_job_lifecycle() -> None:
     # Upload image
     resp = client.post(
         "/api/v1/ingest/image",
-        files={"file": ("log.jpg", io.BytesIO(b"fake-image-bytes"), "image/jpeg")},
+        files={"file": ("log.png", io.BytesIO(_ONE_PIXEL_PNG), "image/png")},
     )
     assert resp.status_code == 201, resp.text
     job_id = resp.json()["job_id"]
@@ -706,6 +713,29 @@ def test_image_job_lifecycle() -> None:
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["committed"] == 1
+
+    app.dependency_overrides.clear()
+
+
+def test_image_upload_rejects_non_image_bytes() -> None:
+    """The upload route refuses content that is not an image before staging it."""
+    ws = _make_workspace()
+    user = _make_user(ws.id)
+    mock_db = MagicMock()
+
+    app = create_app()
+    for k, v in _auth_overrides(ws, user, mock_db).items():
+        app.dependency_overrides[k] = v  # type: ignore[assignment]
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/ingest/image",
+        files={"file": ("log.jpg", io.BytesIO(b"not an image"), "image/jpeg")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == "invalid_image"
+    # Validation happens before the upload is staged, so nothing was written.
+    mock_db.add.assert_not_called()
 
     app.dependency_overrides.clear()
 

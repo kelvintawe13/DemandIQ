@@ -19,17 +19,21 @@ Drive, nothing precious in the ephemeral VM.**
    `kaggle.json`. Upload it to Drive at `MyDrive/kaggle/kaggle.json`.
 2. **Repo access**: the notebook clones your repo. For a private repo, add a
    GitHub token or make the repo public.
-3. Open `model/notebooks/DemandIQ-01-Data-and-Baseline.ipynb` in Colab
-   (GitHub URL works: File > Open notebook > GitHub).
+3. Open `model/notebooks/DemandIQ_03_Training_and_Export_final.ipynb` in Colab
+   (GitHub URL works: File > Open notebook > GitHub). This is the canonical
+   notebook; the others are retained as development history (see
+   [`notebooks/README.md`](notebooks/README.md)).
 
 ## Run
 
-Edit the two config paths in cell 0 if needed, then **Runtime > Run all**.
+Edit the **CONFIG** cell (`REPO_ROOT`, `DATA_ROOT`, `CKPT_DIR`, flags) if
+needed, then **Runtime > Run all**.
 
-Cell 3 fetches the Recruit data via the Kaggle API and extracts the 4 CSVs
-to Drive. It is idempotent: if the CSVs are already there, it skips.
+The **DATA** cell verifies the four Recruit CSVs already committed under
+`model/data/recruit`, and only contacts Kaggle when one is missing. It is
+idempotent: if the CSVs are already there, it does nothing.
 
-Cell 4 runs the pipeline:
+The **TRAIN** cell runs the pipeline:
 
 ```
 [run ] ingest ...
@@ -56,10 +60,14 @@ Recruit dataset audit
 [done] shap in 80.3s -> {'rows_explained': 57866, 'base_value_visitors': 15.562, ...}
 ```
 
-The default run is these nine stages; `sensitivity` and `backtest` are
-opt-in (`--with-sensitivity` / `--with-backtest`). Timings are from the local
-reference run — on Colab they differ, but the stage list and metric keys are
-the same. See [PIPELINE.md](PIPELINE.md) for every value.
+The block above is the pre-tuning reference run. A current default run inserts
+`tune` between `features` and `fallbacks`: a bounded eight-configuration
+LightGBM search scored only on the final 10% of the training window, which
+selects the parameters `lightgbm` then trains with. It adds ten stages in
+total; `sensitivity` and `backtest` remain opt-in (`--with-sensitivity` /
+`--with-backtest`). Timings are from the local reference run — on Colab they
+differ, but the stage list and metric keys are the same. See
+[PIPELINE.md](PIPELINE.md) for every value.
 
 ## Resume after a crash
 
@@ -89,6 +97,8 @@ MyDrive/demandiq/
     baseline_table.parquet       # five-baseline ranking + .md copy
     features.parquet             # leakage-safe feature frame
     features_meta.joblib         # feature-set version + column list
+    tuning_trials.parquet        # per-trial validation MAE from the bounded search
+    tuning_best.joblib           # selected config + the default's validation MAE
     fallback_table.parquet       # linear / RF / XGBoost comparison + .md copy
     validation_predictions.parquet # LightGBM validation-tail predictions
     lightgbm_model.joblib        # trained booster + provenance
@@ -104,9 +114,10 @@ MyDrive/demandiq/
     serving_bundle.joblib        # written by export, not by run_pipeline
 ```
 
-The default run is the nine stages above; pass `stages=[...]` to
-`run_pipeline` to restrict it, or `--with-sensitivity` / `--with-backtest`
-to add the opt-in stages.
+The default run is the ten stages above (including `tune`); pass `stages=[...]`
+to `run_pipeline` to restrict it, or `--with-sensitivity` / `--with-backtest`
+to add the opt-in stages. `--skip-tune` trains LightGBM with the documented
+defaults instead of the search's selection.
 
 `manifest.json` is the provenance record the `model_versions` table expects
 (MODEL_LIFECYCLE.md): any number in a report can be traced to a stage,

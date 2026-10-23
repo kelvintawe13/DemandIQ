@@ -168,6 +168,8 @@ Colab/Colab-CLI session resume exactly where it stopped.
 | `--force` | off | Rerun stages already checkpointed |
 | `--no-strict` | off | Subset run: block only on hard integrity failures |
 | `--skip-lightgbm` | off | Stop after the `features` stage |
+| `--skip-tune` | off | Train LightGBM with the documented defaults instead of the validation-tail search |
+| `--tune-trials` | `8` | Ceiling on tuning configurations evaluated (the grid has 8) |
 | `--with-sensitivity` | off | Add the feature-group / reservations ablation stage |
 | `--with-backtest` | off | Add the rolling-origin backtest stage |
 | `--backtest-folds` | `6` | Number of backtest folds |
@@ -179,23 +181,25 @@ Colab/Colab-CLI session resume exactly where it stopped.
 
 ## 3. The pipeline at a glance
 
-`run_pipeline` executes eleven stages in a fixed order; the standard run is the
-first nine. `sensitivity` and `backtest` are opt-in because each refits the
-primary model many times.
+`run_pipeline` executes twelve stages in a fixed order; the standard run is the
+first ten. `sensitivity` and `backtest` are opt-in because each refits the
+primary model many times. `tune` is bounded and only ever scores the validation
+tail, so it is part of the standard run.
 
 | # | Stage | What it does | Key outputs |
 | --- | --- | --- | --- |
 | 1 | `ingest` | Load + audit Recruit, persist normalised frames | row/store counts, source sha256 |
 | 2 | `baseline` | Five baselines on the same chronological window | MAE/RMSE/RMSLE/MASE/Bias per baseline, `best_baseline` |
 | 3 | `features` | Leakage-safe feature build + gates | rows, feature count, `fs-2026.09.2` |
-| 4 | `fallbacks` | Linear / RF / XGBoost on the primary frame | MAE/RMSE/RMSLE + ranking |
-| 5 | `lightgbm` | Primary model, scored against the best baseline | metrics, `best_iteration`, lift |
-| 6 | `catboost` | Secondary primary, compared to LightGBM | same metrics, `mae_delta_vs_lightgbm` |
-| 7 | `conformal` | Stratified adaptive conformal intervals | coverage, width, per-level breakdown |
-| 8 | `policy` | Preparation-policy simulation | SR/PS/UD per policy, chosen scale |
-| 9 | `shap` | Per-forecast TreeSHAP contributions | top features, additivity error |
-| 10 | `sensitivity` *(opt-in)* | Leave-one-group-out + no-reservations ablation | MAE delta per group |
-| 11 | `backtest` *(opt-in)* | 6-fold rolling-origin refits | per-fold + mean/std, coverage |
+| 4 | `tune` | Bounded LightGBM search scored on the validation tail | per-trial validation MAE, selected config |
+| 5 | `fallbacks` | Linear / RF / XGBoost on the primary frame | MAE/RMSE/RMSLE + ranking |
+| 6 | `lightgbm` | Primary model (selected config), scored against the best baseline | metrics, `best_iteration`, lift |
+| 7 | `catboost` | Secondary primary, compared to LightGBM | same metrics, `mae_delta_vs_lightgbm` |
+| 8 | `conformal` | Stratified adaptive conformal intervals | coverage, width, per-level breakdown |
+| 9 | `policy` | Preparation-policy simulation | SR/PS/UD per policy, chosen scale |
+| 10 | `shap` | Per-forecast TreeSHAP contributions | top features, additivity error |
+| 11 | `sensitivity` *(opt-in)* | Leave-one-group-out + no-reservations ablation | MAE delta per group |
+| 12 | `backtest` *(opt-in)* | 6-fold rolling-origin refits | per-fold + mean/std, coverage |
 
 The dataset boundary, in one picture — arrows are data flow:
 
@@ -205,11 +209,12 @@ RAW DATA (--data-root, default data/recruit)
   → ① ingest  → load + audit (§3.7.1). Nothing trains until this passes.
   → ② baseline → five simple rules; best_baseline = the bar.
   → ③ features → leakage-safe frame, version fs-2026.09.2, gates fail loudly.
-  → ④–⑥ models → fallbacks · LightGBM · CatBoost (same frame, same split).
-  → ⑦ conformal → stratified adaptive intervals.
-  → ⑧ policy   → forecast → preparation quantity (SR/PS/UD).
-  → ⑨ shap     → per-forecast attribution (stored, not recomputed).
-  → ⑩/⑪ opt-in → sensitivity · rolling-origin backtest.
+  → ④ tune     → bounded search on the train window's tail (test never seen).
+  → ⑤–⑦ models → fallbacks · LightGBM · CatBoost (same frame, same split).
+  → ⑧ conformal → stratified adaptive intervals.
+  → ⑨ policy   → forecast → preparation quantity (SR/PS/UD).
+  → ⑩ shap     → per-forecast attribution (stored, not recomputed).
+  → ⑪/⑫ opt-in → sensitivity · rolling-origin backtest.
   → export_serving_bundle.py → serving_bundle.joblib → API registry.
 ```
 
@@ -460,11 +465,12 @@ entire evaluation.
 The tail's only job is to answer "how does this model do **on days right after
 its training data**" — exactly the serving situation. A random 10% would be days
 *inside* the window, where neighbouring days are in training, and early stopping
-would tune for an easier problem. The tail serves three calibration jobs, none of
+would tune for an easier problem. The tail serves four calibration jobs, none of
 which may touch test:
 
 | Job | Why it must not use test |
 | --- | --- |
+| Bounded LightGBM hyperparameter search | Selecting on the test window is fitting to test; the search function is not even given that frame |
 | Early stopping (both boosters) | Choosing when to stop on the test window is fitting to test |
 | Conformal residual warmup | A conformal guarantee assumes calibration data was not used to tune the model |
 | Policy-quantile / risk sweep | These are hyperparameters (Section 3.14 discipline) |
@@ -594,6 +600,20 @@ the *proportional* structure, which is also what RMSLE measures. The `1 +` makes
 zero-demand days legal (`ln(0)` is undefined). Predictions are
 `np.clip(expm1(raw), 0, None)`: inverting a log can, in principle, produce a small
 negative, and negative visitors are impossible.
+
+**Bounded hyperparameter search (validation tail only).** `stage_tune` evaluates
+a fixed eight-configuration grid (`models/search.py:TUNING_GRID`) and selects by
+validation MAE, with RMSE then trial order breaking ties. Trial 0 *is* the
+production default above, so the reported improvement is against the
+configuration the study would otherwise have shipped; a search that finds
+nothing better keeps trial 0 and reports a non-positive improvement rather than
+inventing a winner. The function is handed the fit and validation frames only —
+the test window is not a parameter — and `stage_lightgbm` trains once on the
+selected parameters. Every trial is written to `tuning_trials.parquet` and the
+selection to `tuning_best.joblib`; `--skip-tune` restores the old behaviour and
+leaves `tuning_trial = null` in the LightGBM metrics so the provenance says so.
+The backtest and sensitivity stages refit with the same selection, so their
+figures describe the production configuration rather than an untuned variant.
 
 ### 7.4 CatBoost — the second primary
 
@@ -940,10 +960,12 @@ This is the reference run traced in execution order — `make train-model`
 8 CPUs; total **≈ 5 min 03 s** (`user` time ≈ 4× `real`: LightGBM, CatBoost and
 XGBoost all run with `n_jobs=-1`).
 
-The ten stages below sum to **≈ 4 min 44 s** on their own. The end-to-end total
-is larger because it also covers interpreter startup and the serving-bundle
-export, which measures **≈ 23 s** in isolation (`time python
-scripts/export_serving_bundle.py`).
+The ten recorded stages below sum to **≈ 4 min 44 s** on their own. The
+end-to-end total is larger because it also covers interpreter startup and the
+serving-bundle export, which measures **≈ 23 s** in isolation (`time python
+scripts/export_serving_bundle.py`). This trace predates the `tune` stage, so its
+durations are left as recorded; a fresh run inserts `tune` between `features`
+and `fallbacks` and records its own timings.
 
 | # | Stage | Duration | What it established |
 | --- | --- | --- | --- |
@@ -977,7 +999,7 @@ Concrete details worth knowing when reading the code:
   manifest is keyed by stage name and never reordered. Read `duration_s` /
   `started_at` for the real chronology, not dict order.
 - **Only `waste_summary` sits outside `run_pipeline`.** `sensitivity` *is* one
-  of the eleven stages (§3) — it is merely opt-in, skipped by the default run's
+  of the twelve stages (§3) — it is merely opt-in, skipped by the default run's
   `OPT_IN_STAGES` set alongside `backtest`. `waste_summary`, by contrast, is
   never run by `run_pipeline` at all: it is written by the separate
   `make model-waste` command. If a `sensitivity` entry exists in a manifest from
@@ -997,6 +1019,7 @@ driven by `CheckpointStore` (atomic saves + a per-stage manifest).
 | `visits.parquet`, `stores.parquet`, `calendar.parquet`, `reservations.parquet` | ingest | normalised inputs |
 | `baseline_predictions.parquet`, `baseline_table.parquet`/`.md` | baseline | five-baseline ranking |
 | `features.parquet`, `features_meta.joblib` | features | feature frame + column order + version |
+| `tuning_trials.parquet`, `tuning_best.joblib` | tune | per-trial validation MAE + selected configuration and the default's score |
 | `fallback_table.parquet`/`.md` | fallbacks | linear/RF/XGBoost comparison |
 | `lightgbm_model.joblib`, `lightgbm_predictions.parquet`, `validation_predictions.parquet` | lightgbm | fitted booster + predictions + validation tail |
 | `catboost_model.joblib`, `catboost_predictions.parquet` | catboost | fitted model + predictions |

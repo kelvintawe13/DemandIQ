@@ -31,7 +31,7 @@ MODEL_PY := $(if $(filter python3,$(MODEL_PY_REL)),python3,$(abspath $(MODEL_PY_
 LINT_PATHS := app tests scripts migrations
 
 .PHONY: help install install-backend install-frontend auth-e2e \
-	test-backend test-backend-integration test-frontend e2e-smoke test-model lint-backend \
+	test-backend test-backend-integration test-frontend e2e-smoke e2e-image test-model lint-backend \
 	check-fields lint-frontend typecheck-frontend typecheck-shared build-frontend worker worker-once \
 	verify clean model-waste train-model datasets chapter4-check \
 	docker-build docker-up docker-down docker-ps docker-logs docker-config docker-lint \
@@ -71,6 +71,9 @@ test-frontend: ## Frontend vitest suite
 e2e-smoke: ## Playwright route smoke against a running stack (fails on non-2xx API or console error)
 	cd $(FRONTEND_DIR) && node e2e/route-smoke.mjs
 
+e2e-image: ## Playwright image upload + OCR preview against a running stack
+	cd $(FRONTEND_DIR) && node e2e/image-ingest.mjs
+
 test-model: ## Model unit suite incl. the non-negotiable leakage gate
 	cd $(MODEL_DIR) && $(MODEL_PY) -m pytest -q
 
@@ -84,10 +87,13 @@ test-model: ## Model unit suite incl. the non-negotiable leakage gate
 TRAIN_DATA_ROOT ?= data/recruit
 TRAIN_TEST_START ?= 2017-02-01
 TRAIN_SEED ?= 42
+# Ceiling on the bounded validation-tail search (>= 1); use --skip-tune to disable.
+TRAIN_TUNE_TRIALS ?= 8
 train-model: ## Retrain offline (all stages + backtest) and re-export the serving bundle
 	cd $(MODEL_DIR) && $(MODEL_PY) -m diq_model.train train \
 		--data-root $(TRAIN_DATA_ROOT) --checkpoints artifacts/runs/latest \
-		--test-start $(TRAIN_TEST_START) --seed $(TRAIN_SEED) --with-backtest --force
+		--test-start $(TRAIN_TEST_START) --seed $(TRAIN_SEED) \
+		--tune-trials $(TRAIN_TUNE_TRIALS) --with-backtest --force
 	cd $(MODEL_DIR) && $(MODEL_PY) scripts/export_serving_bundle.py --artifacts artifacts/runs/latest
 	@echo "Serving bundle re-exported; the API publishes its versions on the next bundle read."
 
@@ -138,7 +144,8 @@ verify: lint-backend test-backend check-fields auth-e2e test-backend-integration
 # Containers
 #
 # `make docker-up` brings up the whole stack (postgres, redis, migrations, API,
-# web). The product UI is then on :5173/app/ and the OpenAPI console on :5173/.
+# web). The product UI is then on :5173/ (redirecting to /app/) and the
+# OpenAPI console on :5173/console.
 # See DOCKER.md.
 #
 # Note the deliberate split: `docker-stores` starts ONLY postgres + redis, which

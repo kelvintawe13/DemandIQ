@@ -10,10 +10,30 @@ interface UploadImagePanelProps {
   imageName?: string;
   jobId?: string | null;
   onUploaded: (jobId: string, fileName: string) => void;
-  onReset?: () => void;
 }
 
 const MAX_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_FORMATS = 'JPG, PNG, WebP, GIF, BMP or TIFF';
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/tiff',
+]);
+const SUPPORTED_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
+const HEIC_EXTENSIONS = /\.(heic|heif)$/i;
+const HEIC_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence']);
+
+/** HEIC/HEIF is sniffed by the backend but Pillow cannot decode it without a plugin. */
+function isHeic(file: File) {
+  return HEIC_TYPES.has(file.type.toLowerCase()) || HEIC_EXTENSIONS.test(file.name);
+}
+
+function isSupportedImage(file: File) {
+  return SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase()) || SUPPORTED_EXTENSIONS.test(file.name);
+}
 
 export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePanelProps) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -23,14 +43,28 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   const [dragOver, setDragOver] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  const clearPreview = () => {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
   const handleFile = async (file?: File) => {
     if (!file) return;
     setError(null);
-    if (!file.type.startsWith('image/')) {
-      setError({ message: 'Only image files are accepted (JPG, PNG, HEIC)' });
+    if (isHeic(file)) {
+      clearPreview();
+      setError({ message: 'HEIC/HEIF photos are not supported yet. Convert the photo to JPG or PNG, then upload it again.' });
+      return;
+    }
+    if (!isSupportedImage(file)) {
+      clearPreview();
+      setError({ message: `Unsupported image format. Use ${SUPPORTED_FORMATS}.` });
       return;
     }
     if (file.size > MAX_BYTES) {
+      clearPreview();
       setError({ message: `Image exceeds 5 MiB limit (${(file.size / 1024 / 1024).toFixed(1)} MiB)` });
       return;
     }
@@ -73,6 +107,19 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   };
 
   const hasImage = Boolean(imageName || jobId);
+  const isParseError = Boolean(error?.message.toLowerCase().includes('parse'));
+
+  // Cancelling from the preview panel clears the parent's job state; reset the
+  // local thumbnail and file input too, otherwise the card keeps showing the
+  // discarded photo with the "Upload photo" copy around it.
+  useEffect(() => {
+    if (imageName || jobId) return;
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    if (fileInput.current) fileInput.current.value = '';
+  }, [imageName, jobId]);
 
   useEffect(() => {
     return () => {
@@ -114,16 +161,22 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
           {imageName ?? 'Upload photo of handwritten records'}
         </h3>
         <p className="mt-1.5 max-w-[320px] text-control leading-relaxed text-slate-500">
-          {hasImage ? 'Photo uploaded. The rows found in it are listed on the right — check each one against the photo before importing.' : 'Drag & drop or upload. Your photo is processed on-device before upload.'}
+          {hasImage ? 'Photo uploaded. The rows found in it are listed in the preview — check each one against the photo before importing.' : 'Drag & drop or upload. Your photo is uploaded securely and read for dates and visitor counts.'}
         </p>
         <input
           ref={fileInput}
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff"
           capture="environment"
           className="sr-only"
           aria-label="Handwritten record photo"
-          onChange={(event) => handleFile(event.target.files?.[0])}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Clear the value so picking the same file again after a failed
+            // upload still fires onChange and can be retried.
+            event.target.value = '';
+            void handleFile(file);
+          }}
         />
         <button
           type="button"
@@ -139,7 +192,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
 
       <p className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-body-xs text-slate-500">
         <InfoIcon className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.75} />
-        Accepted formats: JPG, PNG, HEIC • Max size: 5 MiB
+        Accepted formats: {SUPPORTED_FORMATS} • Max size: 5 MiB
       </p>
 
       {!hasImage && (
@@ -152,11 +205,11 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
         <div className="mt-4">
           <EmptyState
             size="sm"
-            variant={error.message.toLowerCase().includes('parse') ? 'error' : error.offline ? 'offline' : 'error'}
-            title={error.message.toLowerCase().includes('parse') ? 'Parse error' : error.offline ? 'Backend offline' : 'Image upload failed'}
+            variant={error.offline ? 'offline' : 'error'}
+            title={isParseError ? 'Parse error' : error.offline ? 'Backend offline' : 'Image upload failed'}
             description={error.message + (error.reference ? ` (ref ${error.reference})` : '')}
             hints={
-              error.message.toLowerCase().includes('parse')
+              isParseError
                 ? ['Check image clarity and try again', error.reference ? `Reference ${error.reference}` : undefined].filter(Boolean) as string[]
                 : error.offline
                   ? ['Backend unreachable. Data saved locally will sync when online.']
@@ -172,7 +225,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
       <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-3.5 py-3">
         <LightbulbIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand-600" strokeWidth={1.75} />
         <p className="text-body-sm leading-relaxed text-slate-700">
-          <span className="font-semibold">Tip:</span> Ensure the handwriting is clear and the date and visitor count are legible.
+          <span className="font-semibold">Tip:</span> Ensure the handwriting is clear and the date and visitor count are legible. Dates can be YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. An unambiguous date such as 12/31 sets the order for the whole photo; otherwise ambiguous numeric dates are day-first. iPhone HEIC/HEIF photos must be converted to JPG first.
         </p>
       </div>
     </section>

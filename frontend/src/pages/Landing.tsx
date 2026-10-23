@@ -138,7 +138,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
   });
 
   return (
-    <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
+    <div className="relative flex h-[100dvh] w-full flex-col overflow-y-auto bg-slate-950 text-slate-100">
       {/* Ambient layer: two slow drifting washes behind everything. */}
       <div aria-hidden="true" className="wash-brand pointer-events-none absolute inset-0" />
       <div aria-hidden="true" className="grain-overlay pointer-events-none absolute inset-0" />
@@ -160,7 +160,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
       )}
 
       {/* Header */}
-      <header className="relative z-10 shrink-0 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur">
+      <header className="sticky top-0 z-10 shrink-0 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur">
         <div className={`${container} flex h-14 items-center justify-between gap-4`}>
           <BrandLogo size="sm" inverse />
           <div className="flex items-center gap-2">
@@ -297,7 +297,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
                   <p className="truncate text-body-sm font-semibold text-slate-100">
                     {heroForecast.location}
                   </p>
-                  <p className="text-meta text-slate-400">{heroForecast.date}</p>
+                  <p className="text-meta text-slate-300">{heroForecast.date}</p>
                 </div>
                 <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-1 text-caption font-semibold text-brand-200">
                   <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
@@ -312,13 +312,13 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
 
               <div className="relative mt-4 flex items-end justify-between gap-4">
                 <div>
-                  <p className="text-overline font-semibold uppercase text-slate-400">
+                  <p className="text-overline font-semibold uppercase text-slate-300">
                     Expected customers
                   </p>
                   <p className="mt-1 text-stat-md font-semibold tabular-nums text-slate-50">
                     {point}
                   </p>
-                  <p className="mt-1 text-meta text-slate-400">
+                  <p className="mt-1 text-meta text-slate-300">
                     likely {heroForecast.lower}–{heroForecast.upper}
                   </p>
                 </div>
@@ -417,6 +417,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
         className="relative z-10 shrink-0 border-t border-slate-200 bg-slate-50"
         onPointerEnter={() => setHovering(true)}
         onPointerLeave={() => setHovering(false)}>
+        <h2 className="sr-only">Why DemandIQ</h2>
         <div className={container}>
           <div role="tablist" aria-label="Sections" className="flex gap-1 overflow-x-auto sm:gap-6">
             {tabs.map((t) => {
@@ -522,7 +523,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
                         <span className="mt-1 line-clamp-2 text-caption leading-snug text-slate-600">
                           {p.label}
                         </span>
-                        <span className="mt-0.5 truncate text-caption text-slate-400">{p.source}</span>
+                        <span className="mt-0.5 truncate text-caption text-slate-500">{p.source}</span>
                       </li>
                     ))}
                   </ul>

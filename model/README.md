@@ -13,7 +13,9 @@ Section 3.7.1 audit, leakage-safe features (3.10) with structural leakage
 probes, MAE/RMSE/RMSLE + MASE/Bias (3.15; MAPE deliberately excluded), the
 **full five-baseline gauntlet** (3.12 / EVALUATION.md: naive, seasonal
 naive, historical average, weekday mean, global average), **LightGBM +
-CatBoost** primaries (3.13-3.14), the **Section 3.13 fallbacks** (Linear
+CatBoost** primaries (3.13-3.14) with a **bounded hyperparameter search
+scored only on the validation tail** (3.14/3.25; trials are persisted and
+published as experiments), the **Section 3.13 fallbacks** (Linear
 Regression, Random Forest, XGBoost, trained on the primary feature frame and
 scored on the same held-out split), **adaptive conformal intervals** (3.16),
 the **preparation-policy simulation** (3.17-3.20), **per-forecast SHAP**
@@ -44,7 +46,7 @@ uv pip install -e ".[training]"             # adds LGBM/CatBoost/XGB/SHAP
 ## Development
 
 ```bash
-.venv/bin/python -m pytest          # 161 tests, synthetic data, no download needed
+.venv/bin/python -m pytest          # full suite, synthetic data, no download needed
 black src tests && ruff check src tests
 ```
 
@@ -64,6 +66,7 @@ model/
 │   ├── models/
 │   │   ├── baselines.py    # All five EVALUATION.md baselines (3.12)
 │   │   ├── lightgbm_model.py  # Primary model: log1p, early stopping (3.13)
+│   │   ├── search.py          # Bounded validation-tail hyperparameter search (3.14)
 │   │   ├── catboost_model.py  # Secondary primary, fallback (3.13)
 │   │   └── fallback_models.py # Linear / RF / XGBoost comparison models (3.13)
 │   ├── uncertainty/
@@ -76,11 +79,13 @@ model/
 │   │   ├── metrics.py      # MAE, RMSE, RMSLE, MASE, Bias, R² (3.15)
 │   │   ├── backtest.py     # Rolling-origin backtest (3.25, opt-in)
 │   │   └── tables.py       # Chapter-4 result tables
-│   └── train.py            # CLI: 9 resumable stages (11 total; sensitivity + backtest opt-in)
-├── tests/                  # 161 tests incl. leakage + fallback + update-rule suites
+│   └── train.py            # CLI: 10 resumable stages (12 total; sensitivity + backtest opt-in)
+├── tests/                  # tests incl. leakage, search, fallback + update-rule suites
 ├── notebooks/
-│   ├── DemandIQ-01-Data-and-Baseline.ipynb  # Colab driver + data/architecture figures
-│   └── DemandIQ-02-Results.ipynb            # Chapter 4: tables, distributions, architecture, charts
+│   ├── DemandIQ_03_Training_and_Export_final.ipynb  # THE notebook: train, evaluate, export
+│   ├── DemandIQ-03-Training-and-Export.ipynb        # superseded draft of the same flow
+│   ├── DemandIQ-01-Data-and-Baseline.ipynb          # reference: data/architecture figures
+│   └── DemandIQ-02-Results.ipynb                    # reference: Chapter 4 tables and figures
 ├── scripts/
 │   ├── render_chapter4.py  # Generates CHAPTER4_DRAFT.md + figures/ from the artifacts
 │   ├── check_chapter4_fresh.py  # Fails if committed draft/figures drifted (make chapter4-check)
@@ -171,10 +176,12 @@ produced a draft; pass `--strict-figures` to also byte-compare the PNGs (off by
 default, as PNG bytes differ across matplotlib builds). CI runs it via the
 `Chapter 4 freshness` step in the `model` job.
 
-The notebooks under `notebooks/` read the same artifacts: `DemandIQ-01` is the
-Colab training driver and renders the data/architecture figures after training;
-`DemandIQ-02` is the Chapter 4 results notebook, where the narrative figures are
-computed from the manifest at run time rather than hard-coded.
+**The canonical notebook is
+[`notebooks/DemandIQ_03_Training_and_Export_final.ipynb`](notebooks/DemandIQ_03_Training_and_Export_final.ipynb).**
+It runs every stage, reports from the run's own artifacts, and exports the
+`serving_bundle.joblib` the backend loads. `DemandIQ-01` and `DemandIQ-02` remain
+as references for the data/architecture figures and the Chapter 4 tables;
+`DemandIQ-03` is a superseded draft. See [`notebooks/README.md`](notebooks/README.md).
 
 ## CLI
 

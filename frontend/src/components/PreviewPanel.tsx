@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronsUpDownIcon, FileTextIcon, CircleCheckBigIcon, ArrowRightIcon } from 'lucide-react';
 import { Modal, ModalButton } from './ui/Modal';
 import { EmptyState } from './ui/EmptyState';
@@ -42,6 +42,14 @@ interface ImageJobResponse {
   rows?: ExtractedRow[];
   /** `remote` (a vision service) or `tesseract` (the local text parser). */
   engine?: string | null;
+  /** Measured engine metadata; `mean_confidence` is 0-1, or null if unreported. */
+  quality?: {
+    mean_confidence?: number | null;
+    page_segmentation_mode?: number | null;
+    width?: number | null;
+    height?: number | null;
+    format?: string | null;
+  } | null;
 }
 
 /**
@@ -81,16 +89,19 @@ const ENGINE_LABEL: Record<string, string> = {
   tesseract: 'Read by the local OCR engine',
 };
 
-export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
+export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [imported, setImported] = useState(false);
   const { toast } = useToast();
 
   const [fetching, setFetching] = useState(false);
+  /** Which job the current rows belong to, so a new job never flashes the empty state. */
+  const [loadedJobId, setLoadedJobId] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<{ message: string; reference?: string | null } | null>(null);
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [engine, setEngine] = useState<string | null>(null);
+  const [quality, setQuality] = useState<ImageJobResponse['quality']>(null);
 
   // locations for commit
   const [locations, setLocations] = useState<Array<{ id: string; name: string }>>([]);
@@ -99,7 +110,24 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
   const [commitLoading, setCommitLoading] = useState(false);
   const [commitError, setCommitError] = useState<{ message: string; reference?: string | null } | null>(null);
 
+  /** The job the panel is showing now; a late response for an older one is ignored. */
+  const jobIdRef = useRef<string | null>(jobId ?? null);
+  jobIdRef.current = jobId ?? null;
+
   const hasJob = Boolean(jobId);
+  // On the render where `jobId` first becomes non-null, the effect below has
+  // not run yet. Without this, the panel renders "No rows detected" for a frame
+  // before the fetch starts — the flash operators see after every upload.
+  const loadingJob = hasJob && (fetching || loadedJobId !== jobId);
+  const statusLabel = imported
+    ? 'Imported'
+    : !hasJob
+      ? 'Ready to extract'
+      : loadingJob
+        ? 'Extracting…'
+        : extractedRows.length === 0 && editingRows.length === 0
+          ? 'No rows detected'
+          : 'Extraction complete';
 
   // fetch locations for location picker
   useEffect(() => {
@@ -118,10 +146,14 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
     setFetchError(null);
     try {
       const res = await api.get<ImageJobResponse>(`/api/v1/ingest/image/${id}`);
+      // Cancelled or replaced while the request was in flight: this response
+      // belongs to a job the panel no longer shows.
+      if (jobIdRef.current !== id) return;
       const rows: ExtractedRow[] = (res.extracted_rows ?? (res as unknown as { rows?: ExtractedRow[] }).rows ?? []) as ExtractedRow[];
       setExtractedRows(rows);
       setNote(res.note ?? null);
       setEngine(res.engine ?? null);
+      setQuality(res.quality ?? null);
       // Initialise the editable copy, carrying each row's score so the review
       // step can point at the ones worth a second look.
       setEditingRows(
@@ -136,32 +168,37 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
         // OCR returned no readable rows; nothing to poll for.
       }
     } catch (e: unknown) {
+      if (jobIdRef.current !== id) return;
       if (e instanceof ApiException) {
         setFetchError({ message: e.error.message, reference: e.reference ?? undefined });
       } else {
         setFetchError({ message: e instanceof Error ? e.message : 'Failed to fetch image job' });
       }
     } finally {
-      setFetching(false);
+      if (jobIdRef.current === id) {
+        setFetching(false);
+        setLoadedJobId(id);
+      }
     }
   };
 
-  // poll when jobId changes
+  // OCR runs synchronously inside POST /ingest/image, so the job is already
+  // ready when this panel receives its id. Polling it every 3s only repeated
+  // the same 200 response forever and overwrote rows the operator had started
+  // editing (the manual-entry rows are reset from the response on each fetch).
   useEffect(() => {
     if (!jobId) {
       setExtractedRows([]);
       setEditingRows([]);
       setFetchError(null);
       setEngine(null);
+      setQuality(null);
       setImported(false);
+      setLoadedJobId(null);
+      setFetching(false);
       return;
     }
-    fetchJob(jobId);
-    // poll every 3s while not imported
-    const id = window.setInterval(() => {
-      if (jobId && !imported) fetchJob(jobId);
-    }, 3000);
-    return () => window.clearInterval(id);
+    void fetchJob(jobId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
@@ -247,7 +284,7 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
             imported ? 'bg-brand-700 text-white' : hasJob ? 'bg-brand-700 text-white' : 'bg-brand-100 text-brand-800'
           ].join(' ')}
         >
-          {imported ? 'Imported' : hasJob ? 'Extraction complete' : 'Ready to extract'}
+          {statusLabel}
         </span>
       </div>
       <p className="mt-1 text-control text-slate-500">
@@ -258,10 +295,14 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-brand-700 px-3 py-2.5 sm:px-4">
           <span className="text-body-sm-lg font-semibold text-white">Extracted Data (Preview)</span>
           <span className="text-meta text-brand-100">
-            {fetching
+            {loadingJob
               ? 'Loading…'
               : hasJob
-                ? `${extractedRows.length} rows detected${engine && ENGINE_LABEL[engine] ? ` · ${ENGINE_LABEL[engine]}` : ''}`
+                ? `${extractedRows.length} rows detected${engine && ENGINE_LABEL[engine] ? ` · ${ENGINE_LABEL[engine]}` : ''}${
+                    engine === 'tesseract' && quality?.mean_confidence != null
+                      ? ` · OCR quality: ${quality.mean_confidence >= 0.8 ? 'high' : quality.mean_confidence >= 0.6 ? 'medium' : 'low'}`
+                      : ''
+                  }`
                 : '2 columns detected'}
           </span>
         </div>
@@ -280,8 +321,8 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
 
           {showEmptyNoImage ? (
             <EmptyState size="sm" variant="empty" title="No data extracted yet" description="Upload an image to see extracted dates and visitor counts." />
-          ) : fetching ? (
-            <p className="py-6 text-center text-body-xs text-slate-500">Fetching extracted rows…</p>
+          ) : loadingJob ? (
+            <p role="status" className="py-6 text-center text-body-xs text-slate-500">Fetching extracted rows…</p>
           ) : fetchError ? (
             <EmptyState
               size="sm"
@@ -290,6 +331,7 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
               description={fetchError.message + (fetchError.reference ? ` (ref ${fetchError.reference})` : '')}
               hints={fetchError.reference ? [`Reference ${fetchError.reference}`] : undefined}
               action={{ label: 'Retry', onClick: () => jobId && fetchJob(jobId) }}
+              secondaryAction={onClear ? { label: 'Start over', onClick: onClear } : undefined}
             />
           ) : extractedRows.length === 0 && editingRows.length === 0 ? (
             <div className="flex flex-col gap-3">
@@ -371,8 +413,13 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
                   taken. Compare them with the photo before importing.
                 </p>
               )}
-              {/* extracted rows table with inline editing */}
-              <ul className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {/* The rows scroll inside the panel so a 100-row photo does not
+                  push the confirm controls and the whole page down with it. */}
+              <ul
+                aria-label="Extracted rows"
+                tabIndex={0}
+                className="touch-scroll flex max-h-[420px] flex-col divide-y divide-slate-100 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              >
                 {editingRows.map((row, idx) => {
                   const note = scoreNote(engine, row);
                   return (
@@ -459,6 +506,16 @@ export function PreviewPanel({ imageName, jobId }: PreviewPanelProps) {
         {imported ? 'Imported' : commitLoading ? 'Committing…' : 'Review & Confirm'}
         <ArrowRightIcon className="h-5 w-5" strokeWidth={2} />
       </button>
+      {hasJob && !imported && onClear && (
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={commitLoading}
+          className="mt-2.5 inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-body-xs font-semibold text-slate-700 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel upload
+        </button>
+      )}
       <p className="mt-2.5 text-center text-body-xs text-slate-500">
         {hasJob ? 'Review extracted data and confirm import.' : 'Upload an image to enable importing.'}
       </p>

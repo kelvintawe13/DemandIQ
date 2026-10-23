@@ -186,19 +186,56 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
     setCurrentCursor(copy.length ? copy[copy.length - 1] ?? undefined : undefined);
   };
 
+  /** Return the image panels to their empty state. */
+  const clearImageSelection = () => {
+    setJobId(null);
+    setImageName(undefined);
+  };
+
   const handleDelete = async (id: string) => {
     // Discarding a staged upload cannot be undone, so confirm before it happens.
     if (!window.confirm('Discard this upload? Anything not yet imported is lost.')) return;
+    const deletingCurrentJob = id === jobId;
     try {
       await api.delete(`/api/v1/ingest/uploads/${id}`);
+      if (deletingCurrentJob) clearImageSelection();
       toast('Upload discarded');
       // Forced: the row on screen is known stale, so this must not be swallowed
       // by the in-flight guard.
       fetchUploads(currentCursor, { force: true });
     } catch (e: unknown) {
+      // A 404 means another tab or a retry already discarded it. The preview
+      // must still stop pointing at a job that no longer exists.
+      if (e instanceof ApiException && e.status === 404) {
+        if (deletingCurrentJob) clearImageSelection();
+        toast('Upload already discarded');
+        fetchUploads(currentCursor, { force: true });
+        return;
+      }
       if (e instanceof ApiException) toast(e.error.message, 'error');
       else toast('Failed to delete upload', 'error');
     }
+  };
+
+  /**
+   * Cancel the staged image job from the preview panel. Clear the panels first
+   * so the UI never sits on a job that is being deleted; if the delete itself
+   * fails, the refreshed Recent uploads row is still there to retry from.
+   */
+  const handleImageCancelled = async () => {
+    if (!jobId) return;
+    if (!window.confirm('Discard this upload? Anything not yet imported is lost.')) return;
+    const id = jobId;
+    clearImageSelection();
+    try {
+      await api.delete(`/api/v1/ingest/uploads/${id}`);
+      toast('Image upload discarded');
+    } catch (e: unknown) {
+      if (!(e instanceof ApiException && e.status === 404)) {
+        toast('Removed from this screen, but the staged upload could not be deleted.', 'error');
+      }
+    }
+    fetchUploads(currentCursor, { force: true });
   };
 
   const handleImageUploaded = (newJobId: string, fileName: string) => {
@@ -335,7 +372,7 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
         {activeTabId === 'image' && (
           <>
             <UploadImagePanel imageName={imageName} jobId={jobId} onUploaded={handleImageUploaded} />
-            <PreviewPanel imageName={imageName} jobId={jobId} />
+            <PreviewPanel imageName={imageName} jobId={jobId} onClear={handleImageCancelled} />
           </>
         )}
         {activeTabId === 'excel' && <ExcelCsvTab />}

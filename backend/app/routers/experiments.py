@@ -1,14 +1,24 @@
 """Experiment endpoints — admin.
 
 * GET  /api/v1/experiments
-* POST /api/v1/experiments
+* POST /api/v1/experiments   (refused — this API does not run backtests)
 * GET  /api/v1/experiments/{id}
 * POST /api/v1/experiments/{id}/submit
+
+Experiments are published, not created here. The offline model package scores
+the rolling-origin folds and the bounded validation-tail search, and exports
+both in the serving bundle; ``GET`` calls
+:func:`app.services.forecasting.loader.ensure_bundle_experiments` and
+:func:`app.services.forecasting.loader.ensure_bundle_tuning`, which write those
+measured folds and trials (and their baselines) into the registry. ``POST`` used to
+insert a completed experiment with synthetic metrics, which made the screen
+look like a backtest had run when nothing had. It now says so, on the same
+principle as ``POST /models/train``: training and evaluation belong to the
+pipeline, and a request cannot invent their results.
 """
 
 from __future__ import annotations
 
-import datetime
 import logging
 import uuid
 from typing import Annotated, Any
@@ -23,7 +33,10 @@ from app.deps import get_current_user
 from app.models.experiment import Experiment, ExperimentFold
 from app.models.user import User
 from app.security.permissions import EXPERIMENTS_MANAGE, has_capability
-from app.services.forecasting.loader import ensure_bundle_experiments
+from app.services.forecasting.loader import (
+    ensure_bundle_experiments,
+    ensure_bundle_tuning,
+)
 from app.services.governance import create_change_request
 
 logger = logging.getLogger(__name__)
@@ -130,12 +143,14 @@ def list_experiments(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """List backtests (admin)."""
+    """List published backtests and tuning trials (admin)."""
     _require_admin(current_user)
-    # Publish the serving bundle's real rolling-origin backtest before listing,
-    # so the screen shows the folds the trained run actually scored rather than
-    # only experiments someone queued here. No-op without a bundle.
+    # Publish the serving bundle's real rolling-origin backtest and tuning
+    # trials before listing, so the screen shows what the trained run actually
+    # scored rather than only experiments someone queued here. No-op without
+    # the corresponding bundle section.
     ensure_bundle_experiments(db, current_user.workspace_id)
+    ensure_bundle_tuning(db, current_user.workspace_id)
     q = (
         select(Experiment)
         .where(Experiment.workspace_id == current_user.workspace_id)
@@ -157,15 +172,25 @@ def list_experiments(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=dict, status_code=201)
+@router.post("", response_model=dict)
 def create_experiment(
     payload: ExperimentCreateRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Create a backtest experiment with fold handling."""
+    """Refuse to fabricate a backtest — evaluate in the model package instead.
+
+    A request cannot train, score six expanding windows, and report a fold-level
+    MAE. The previous implementation answered 201 with metrics derived from
+    ``uuid4()``, so the screen listed a completed experiment whose numbers no
+    run ever produced; re-submitting the same form produced different results.
+    The honest answer is the one ``POST /models/train`` already gives: run the
+    pipeline, export the bundle, and the registry publishes what it measured.
+    """
     _require_admin(current_user)
+    # Validate the body first so a malformed request still gets a field-level
+    # 422 rather than learning about the refusal before its shape was checked.
     algo = payload.algorithm.lower()
     if algo not in ALLOWED_ALGORITHMS:
         raise _error(
@@ -174,57 +199,13 @@ def create_experiment(
     if not payload.feature_set.strip():
         raise _error(400, "invalid_request", "feature_set is required", field="feature_set")
 
-    now = datetime.datetime.now(datetime.UTC)
-    # Deterministic synthetic metrics for the experiment.
-    base_mae = 12.0 + (uuid.uuid4().int % 5)
-    baseline = base_mae + 2.5
-    coverage = 88.0 + (uuid.uuid4().int % 4)
-
-    exp = Experiment(
-        id=uuid.uuid4(),
-        workspace_id=current_user.workspace_id,
-        name=payload.name,
-        hypothesis=payload.hypothesis,
-        config={"algorithm": algo, "feature_set": payload.feature_set, "folds": payload.folds},
-        status="completed",
-        mae=round(base_mae, 3),
-        baseline_mae=round(baseline, 3),
-        coverage=round(coverage, 2),
-        created_by=current_user.id,
-        finished_at=now,
-        created_at=now,
+    raise _error(
+        501,
+        "backtests_not_run_here",
+        "This API does not run backtests. Run the training pipeline in the model/ "
+        "package (make train-model) and export the serving bundle; its rolling-origin "
+        "folds are published here automatically.",
     )
-    db.add(exp)
-    db.flush()
-
-    # Create folds.
-    folds: list[ExperimentFold] = []
-    for i in range(payload.folds):
-        train_start = now.date() - datetime.timedelta(days=60 + i * 3)
-        train_end = train_start + datetime.timedelta(days=28)
-        test_start = train_end + datetime.timedelta(days=1)
-        test_end = test_start + datetime.timedelta(days=7)
-        mae = round(base_mae + (i * 0.15) - 0.3, 3)
-        fold_cov = round(coverage + (i * 0.2) - 0.4, 2)
-        fold = ExperimentFold(
-            id=uuid.uuid4(),
-            experiment_id=exp.id,
-            fold_index=i,
-            train_start=train_start,
-            train_end=train_end,
-            test_start=test_start,
-            test_end=test_end,
-            mae=mae,
-            coverage=fold_cov,
-        )
-        db.add(fold)
-        folds.append(fold)
-    db.flush()
-
-    logger.info(
-        "experiment created id=%s ws=%s by=%s", exp.id, current_user.workspace_id, current_user.id
-    )
-    return _experiment_to_dict(exp, folds)
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,11 @@ from app.models.location_access import LocationAccessLog
 from app.models.user import User
 from app.security.permissions import INGEST_WRITE, has_capability
 from app.services.ingestion.file import apply_column_map, parse_file_content
-from app.services.ingestion.image import preview_for_image
+from app.services.ingestion.image import (
+    ImageValidationError,
+    preview_for_image,
+    validate_image_upload,
+)
 from app.services.ingestion.normaliser import (
     NormaliserError,
     commit_demand,
@@ -553,7 +557,7 @@ async def upload_image(
     current_user: Annotated[User, Depends(get_current_user)],
     file: Annotated[UploadFile, File(description="Handwritten log image")],
 ) -> dict[str, Any]:
-    """Queue an image for OCR and return a job id."""
+    """Run OCR on an uploaded image and stage reviewable rows."""
     if not file.filename:
         raise _error(400, "validation_error", "Filename is required", field="file")
 
@@ -562,6 +566,14 @@ async def upload_image(
         raise _error(400, "file_too_large", f"Image exceeds {MAX_IMAGE_BYTES} bytes", field="file")
     if not data:
         raise _error(400, "empty_file", "Image is empty", field="file")
+
+    # The content decides, not the filename or the browser-provided MIME type.
+    # Rejecting here keeps non-images out of the review queue and out of the
+    # remote OCR service, instead of returning a job that can only fail later.
+    try:
+        validate_image_upload(data, file.filename)
+    except ImageValidationError as exc:
+        raise _error(400, "invalid_image", str(exc), field="file") from None
 
     preview = preview_for_image(data, file.filename)
 
@@ -611,6 +623,10 @@ def get_image_job(
         # screen words each row from this rather than showing one number as if it
         # meant the same thing either way.
         "engine": preview.get("engine"),
+        # Measured engine metadata (mean word confidence, page segmentation mode,
+        # decoded dimensions). Kept separate from each row's confidence, which
+        # for the local parser is a readability signal rather than a probability.
+        "quality": preview.get("quality"),
         "note": preview.get("note"),
     }
 

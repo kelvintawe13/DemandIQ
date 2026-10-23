@@ -455,51 +455,61 @@ def test_experiments_crud_and_detail() -> None:
     app.dependency_overrides[get_current_user] = lambda: admin  # type: ignore[assignment]
     client = TestClient(app)
 
-    # Empty list
+    # A published backtest: seeded directly, because POST no longer creates one.
+    now = datetime.datetime.now(datetime.UTC)
+    exp = Experiment(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        name="Test exp",
+        hypothesis="lag_7 improves MAE",
+        config={"algorithm": "lightgbm", "feature_set": "fs-test", "folds": 3},
+        status="completed",
+        mae=6.702,
+        baseline_mae=7.667,
+        coverage=89.98,
+        created_by=admin.id,
+        finished_at=now,
+        created_at=now,
+    )
+    stores[Experiment][exp.id] = exp
+    for i in range(3):
+        fold = ExperimentFold(
+            id=uuid.uuid4(),
+            experiment_id=exp.id,
+            fold_index=i,
+            mae=6.7 + i * 0.1,
+            coverage=0.90,
+        )
+        stores[ExperimentFold][fold.id] = fold
+
+    # List reads the published row.
     resp = client.get("/api/v1/experiments")
     assert resp.status_code == 200
-    assert resp.json()["data"] == []
+    assert [row["name"] for row in resp.json()["data"]] == ["Test exp"]
 
-    # Create with folds handling
-    resp = client.post(
-        "/api/v1/experiments",
-        json={
-            "name": "Test exp",
-            "hypothesis": "lag_7 improves MAE",
-            "algorithm": "lightgbm",
-            "feature_set": "v2",
-            "folds": 3,
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    exp_body = resp.json()
-    assert exp_body["name"] == "Test exp"
-    assert "id" in exp_body
-    eid = exp_body["id"]
-    assert exp_body["config"]["folds"] == 3
-    assert "folds" in exp_body
-    assert len(exp_body["folds"]) == 3
-    # Fold-level fields
-    for f in exp_body["folds"]:
-        assert "mae" in f
-        assert "coverage" in f
-        assert "fold_index" in f
-
-    # List now has one
-    resp = client.get("/api/v1/experiments")
-    assert len(resp.json()["data"]) == 1
-
-    # Detail returns fold-level MAE, coverage, baseline delta
-    resp = client.get(f"/api/v1/experiments/{eid}")
+    # Detail returns fold-level MAE, coverage, baseline delta.
+    resp = client.get(f"/api/v1/experiments/{exp.id}")
     assert resp.status_code == 200, resp.text
     detail = resp.json()
-    assert detail["id"] == eid
-    assert "folds" in detail
+    assert detail["id"] == str(exp.id)
     assert len(detail["folds"]) == 3
     for f in detail["folds"]:
         assert "mae" in f
         assert "coverage" in f
         assert "baseline_delta" in f or "baseline_mae" in f
+
+    # POST is refused: the API does not run the backtest.
+    resp = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "Fabricated",
+            "algorithm": "lightgbm",
+            "feature_set": "v2",
+            "folds": 3,
+        },
+    )
+    assert resp.status_code == 501, resp.text
+    assert resp.json()["error"]["code"] == "backtests_not_run_here"
 
     # Not found
     resp = client.get(f"/api/v1/experiments/{uuid.uuid4()}")
@@ -524,18 +534,23 @@ def test_experiments_submit_to_approvals_queue() -> None:
     app.dependency_overrides[get_current_user] = lambda: requester  # type: ignore[assignment]
     client = TestClient(app)
 
-    resp = client.post(
-        "/api/v1/experiments",
-        json={
-            "name": "Submit exp",
-            "hypothesis": "h",
-            "algorithm": "catboost",
-            "feature_set": "v5",
-            "folds": 2,
-        },
+    now = datetime.datetime.now(datetime.UTC)
+    exp = Experiment(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        name="Submit exp",
+        hypothesis="h",
+        config={"algorithm": "catboost", "feature_set": "v5", "folds": 2},
+        status="completed",
+        mae=6.69,
+        baseline_mae=7.667,
+        coverage=89.98,
+        created_by=requester.id,
+        finished_at=now,
+        created_at=now,
     )
-    assert resp.status_code == 201
-    eid = resp.json()["id"]
+    stores[Experiment][exp.id] = exp
+    eid = str(exp.id)
 
     # Submit sends to approvals queue (change_requests)
     resp = client.post(f"/api/v1/experiments/{eid}/submit")

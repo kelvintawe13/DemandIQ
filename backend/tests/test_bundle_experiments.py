@@ -2,9 +2,11 @@
 
 ``ensure_bundle_experiments`` publishes a training run's own rolling-origin
 backtest into ``experiments``/``experiment_folds`` so the console shows the
-folds the run actually scored. These tests pin the three behaviours that
-matter: it registers the folds, it is idempotent, and it is a no-op without a
-bundle (the CI/dev default).
+folds the run actually scored. ``ensure_bundle_tuning`` does the same for the
+bounded validation-tail search: one experiment per trial, with its validation
+MAE against the default configuration's. These tests pin the behaviours that
+matter: registration, idempotency, and no-op without a bundle (the CI/dev
+default).
 """
 
 from __future__ import annotations
@@ -142,5 +144,122 @@ def test_noop_when_run_has_no_backtest(monkeypatch) -> None:
     db = _mock_db(None, [])
 
     loader.ensure_bundle_experiments(db, WORKSPACE)
+
+    db.add.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Bounded validation-tail tuning trials
+# ---------------------------------------------------------------------------
+
+
+def _tuning_bundle() -> dict:
+    return {
+        "model": {"algorithm": "lightgbm", "version": "lightgbm-fs-2026.09.2-it200"},
+        "tuning": {
+            "model_version": "lightgbm-fs-2026.09.2-it200",
+            "feature_set_version": "fs-2026.09.2",
+            "selection_split": "validation_tail",
+            "selection_metric": "validation_mae",
+            "max_trials": 3,
+            "best_trial": 1,
+            "best_params": {
+                "learning_rate": 0.03,
+                "num_leaves": 31,
+                "min_data_in_leaf": 20,
+                "feature_fraction": 0.9,
+            },
+            "default_validation_mae": 8.1,
+            "best_validation_mae": 7.9,
+            "improvement": 0.2,
+            "trials": [
+                {
+                    "trial": 0,
+                    "params": {"learning_rate": 0.05, "num_leaves": 63},
+                    "validation_mae": 8.1,
+                    "validation_rmse": 14.2,
+                    "validation_rmsle": 0.71,
+                    "validation_mase": 0.92,
+                    "best_iteration": 180,
+                    "selected": False,
+                },
+                {
+                    "trial": 1,
+                    "params": {"learning_rate": 0.03, "num_leaves": 31},
+                    "validation_mae": 7.9,
+                    "validation_rmse": 13.9,
+                    "validation_rmsle": 0.69,
+                    "validation_mase": 0.90,
+                    "best_iteration": 240,
+                    "selected": True,
+                },
+                {
+                    "trial": 2,
+                    "params": {"learning_rate": 0.03, "num_leaves": 63},
+                    "validation_mae": 8.05,
+                    "validation_rmse": 14.0,
+                    "validation_rmsle": 0.70,
+                    "validation_mase": 0.91,
+                    "best_iteration": 210,
+                    "selected": False,
+                },
+            ],
+        },
+    }
+
+
+def test_registers_every_tuning_trial_with_its_validation_mae(monkeypatch) -> None:
+    monkeypatch.setattr(loader, "get_bundle", lambda: _tuning_bundle())
+    db = _mock_db(None, [])
+
+    loader.ensure_bundle_tuning(db, WORKSPACE)
+
+    added = [call.args[0] for call in db.add.call_args_list]
+    experiments = [o for o in added if isinstance(o, Experiment)]
+    assert len(experiments) == 3
+    assert [e.config["trial"] for e in experiments] == [0, 1, 2]
+    assert [e.config["selected"] for e in experiments] == [False, True, False]
+    assert all(e.config["source"] == "training_run_tuning" for e in experiments)
+    assert all(e.config["selection_split"] == "validation_tail" for e in experiments)
+    assert experiments[1].config["params"] == {
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+    }
+    # ``mae`` is the trial's validation-tail error; ``baseline_mae`` is the
+    # documented default on the same tail, so the comparison is like-for-like.
+    assert [float(e.mae) for e in experiments] == [8.1, 7.9, 8.05]
+    assert all(float(e.baseline_mae) == 8.1 for e in experiments)
+    # Tuning scores point accuracy only - no interval was measured.
+    assert all(e.coverage is None for e in experiments)
+    assert all(e.status == "completed" for e in experiments)
+    assert "trial 2" in experiments[1].name
+
+
+def test_tuning_registration_is_idempotent(monkeypatch) -> None:
+    monkeypatch.setattr(loader, "get_bundle", lambda: _tuning_bundle())
+    exp = Experiment(
+        id=uuid.uuid4(),
+        workspace_id=WORKSPACE,
+        name="Validation-tail tuning — lightgbm-fs-2026.09.2-it200 — trial 1",
+        config={"source": "training_run_tuning"},
+        status="completed",
+        mae=None,
+        baseline_mae=None,
+    )
+    db = _mock_db(exp, [])
+
+    loader.ensure_bundle_tuning(db, WORKSPACE)
+
+    db.add.assert_not_called()
+    # Missing figures are backfilled; the row is not duplicated or replaced.
+    assert float(exp.mae) == 8.1
+    assert float(exp.baseline_mae) == 8.1
+
+
+def test_tuning_is_noop_without_a_tuning_section(monkeypatch) -> None:
+    monkeypatch.setattr(loader, "get_bundle", lambda: {"model": {"version": "x"}})
+    db = _mock_db(None, [])
+
+    loader.ensure_bundle_tuning(db, WORKSPACE)
 
     db.add.assert_not_called()

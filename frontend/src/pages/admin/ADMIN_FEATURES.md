@@ -14,9 +14,9 @@ Administrator-only console (`Administrator` role per `backend/API_ENDPOINTS.md` 
 **Data:** `model_versions` (`schema.sql:159`), `calibrations` (`schema.sql:180`), `feature_set_version` pinned (e.g. `fs-2026.09.3`).
 
 ## Experiments — `Experiments.tsx` — `/admin/experiments`
-**Purpose:** Ch 3.11 chronological validation + Ch 3.15 metrics + Ch 3.25 sensitivity (backtests).  
-**Contracts:** `GET /experiments`, `POST /experiments { name, hypothesis, algorithm, feature_set, folds }`, `GET /experiments/{id}` (fold MAE/coverage, baseline delta), `POST /experiments/{id}/submit` → approvals queue.  
-**Data:** `experiments` + `experiment_folds` (`schema.sql:190-212`); no random splits, expanding/rolling-origin only on train; test never used for tuning.
+**Purpose:** Ch 3.11 chronological validation + Ch 3.14/3.25 bounded tuning + Ch 3.15 metrics + Ch 3.25 sensitivity (backtests).
+**Contracts:** `GET /experiments` (published from the serving bundle: rolling-origin folds and validation-tail tuning trials), `GET /experiments/{id}` (fold MAE/coverage, or a trial's validation MAE against the default config), `POST /experiments/{id}/submit` → approvals queue. `POST /experiments` answers **501**: backtests are measured by the `model/` pipeline, not fabricated by a request, so the screen is read-only.
+**Data:** `experiments` + `experiment_folds` (`schema.sql:190-212`); no random splits, expanding/rolling-origin only on train; the bounded tuning search scores the validation tail only, and the test window is never used for tuning.
 
 ## FeatureStore — `FeatureStore.tsx` — `/admin/features`
 **Purpose:** Ch 3.10 feature engineering + `model/FEATURE_SPEC.md` (information boundary `as_of = t-1@23:59`, no feature reads `date>=t`).  

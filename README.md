@@ -473,8 +473,11 @@ calibrations  ── adaptive conformal state per location + demand bucket
 
 ## ML model and notebook
 
-`model/notebooks/DemandIQ-01-Data-and-Baseline.ipynb` — 13 cells, runs end to end
-locally or on Colab, checkpoints after every stage so a re-run is nearly free.
+**The notebook used for the deliverable is
+`model/notebooks/DemandIQ_03_Training_and_Export_final.ipynb`** — it runs the
+full pipeline, reports from the run's own artifacts, and exports the serving
+bundle the API loads. The other notebooks are retained as references; see
+`model/notebooks/README.md`.
 
 ### Data visualisation and engineering
 
@@ -731,6 +734,7 @@ Where to look for each thing the assignment asks about.
 | `lib/`, `hooks/` | API client, formatting, data hooks |
 | `__tests__/` | Vitest + Testing Library; `contrast.test.ts`, `typeScale.test.ts` enforce the design system |
 | `frontend/e2e/route-smoke.mjs` | Route smoke test |
+| `frontend/e2e/image-ingest.mjs` | Browser E2E: upload a photo, inspect/edit the OCR preview, discard the staged job |
 
 ### Backend — `backend/app/`
 
@@ -751,8 +755,9 @@ Where to look for each thing the assignment asks about.
 
 | Path | What it demonstrates |
 | --- | --- |
-| `notebooks/DemandIQ-01-Data-and-Baseline.ipynb` | The deliverable notebook: 13 cells, 5 figures, checkpoints |
-| `src/diq_model/train.py` | Nine-stage pipeline with checkpointing |
+| `notebooks/DemandIQ_03_Training_and_Export_final.ipynb` | The deliverable notebook: full pipeline, evaluation, bundle export |
+| `notebooks/DemandIQ-01-Data-and-Baseline.ipynb` | Reference: data and baseline figures |
+| `src/diq_model/train.py` | Ten-stage pipeline with checkpointing (bounded validation-tail tuning included) |
 | `src/diq_model/features/build.py` | `shift(1)` leakage discipline, 26 features |
 | `src/diq_model/models/` | LightGBM, CatBoost, fallback wrappers |
 | `src/diq_model/evaluate/metrics.py` | MAE, RMSE, RMSLE, MASE, R², bias |
@@ -896,8 +901,9 @@ cp .env.example .env     # optional — every value has a working default
 make docker-up           # postgres + redis + migrate + api + web
 ```
 
-- Product UI: <http://localhost:5173/app/>
-- OpenAPI console: <http://localhost:5173>
+- Product UI: <http://localhost:5173/> (redirects to `/app/`)
+- OpenAPI console: <http://localhost:5173/console>
+- API direct: <http://localhost:8000/api/v1/health>
 
 ### Staging
 
@@ -959,6 +965,7 @@ Full guide, topology rationale and troubleshooting: [DOCKER.md](DOCKER.md).
 | Frontend | `npm run test` | 486 passed across 53 files |
 | Model | `make test-model` | leakage gate + ML pipeline (needs `model[model]` extras) |
 | Auth E2E | `make auth-e2e` | 25 checks on a disposable Postgres with real migrations and real HTTP |
+| Image E2E | `make e2e-image` | Uploads a photo in Chromium, checks OCR rows and inline editing, then discards the staged job (needs `BACKEND_EXTRAS=ocr`) |
 | Lint / types | `make lint-backend lint-frontend typecheck-frontend` | ruff, black, mypy, eslint, `tsc --noEmit` all clean |
 
 One-command verification: `npm run verify`.

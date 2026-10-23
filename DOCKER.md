@@ -12,8 +12,8 @@ Then:
 
 | URL | What |
 |---|---|
-| <http://localhost:5173/app/> | the product UI |
-| <http://localhost:5173/> | the OpenAPI console (served by the API, proxied) |
+| <http://localhost:5173/> | the product UI (redirects to `/app/`) |
+| <http://localhost:5173/console> | the OpenAPI console (served by the API, proxied) |
 | <http://localhost:8000/docs> | Swagger, if you want the API port directly |
 
 Stop it with `make docker-down` (keeps data) or `make docker-nuke` (deletes the
@@ -66,10 +66,12 @@ useful; the production checklist below says what to do about it.
 `/app/`, and the nginx config serves it there.
 
 This is not a preference — `backend/app/main.py` also mounts the same `dist` at
-`/app`, and the API's `/` is the OpenAPI console. Changing the base on one side
-without the other makes every asset 404. If you move the UI to `/`, change
-`vite.config.ts`, the `location /app/` blocks in `frontend/nginx.conf`, **and**
-the backend's mount point together.
+`/app`. The web tier redirects `/` to `/app/` so the first URL someone opens is
+the product rather than the API's JSON banner; the console keeps its own path at
+`/console`. Changing the bundle base on one side without the other makes every
+asset 404. If you move the UI to `/`, change `vite.config.ts`, the
+`location /app/` blocks in `frontend/nginx.conf`, **and** the backend's mount
+point together.
 
 ### Why the API URL is empty at build time
 
@@ -194,7 +196,13 @@ waits on `backend: condition: service_healthy`, the web tier does not come up
 to serve it. `docker compose ps` shows the unhealthy service, and the
 `/api/v1/health` response says which mode it is in.
 
-`BACKEND_EXTRAS=ocr` adds pytesseract/Pillow for handwritten-log ingestion.
+`BACKEND_EXTRAS=ocr` adds pytesseract/Pillow **and** the Tesseract system
+packages (`tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-osd`) to the
+runtime image. The Python wrapper alone is not an OCR engine: without the
+binary, every photo honestly returns zero rows with a "no engine configured"
+note. Set `OCR_LANGUAGE` to match an installed language pack; the default `eng`
+is installed above. `OCR_SERVICE_URL` remains the alternative for a hosted
+vision service and bypasses the local binary.
 
 Uploads and datasets live in Postgres, not on the container filesystem, so
 neither needs a volume.

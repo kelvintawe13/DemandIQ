@@ -3,7 +3,6 @@ node_modules
 
 # Frontend build output
 frontend/dist/
-frontend/e2e/
 
 # Frontend environment (local overrides)
 frontend/.env

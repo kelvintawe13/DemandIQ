@@ -47,6 +47,12 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# Every copy and install below is relative to this directory. Without it the
+# manifests land in `/` and `pip install .` runs there, so setuptools' package
+# discovery walks the entire container filesystem (including /proc) and hangs
+# instead of building the wheel.
+WORKDIR /app
+
 # The dependency layer copies ONLY pyproject.toml/README.md and installs the
 # runtime dependency list parsed out of it, so editing application code does not
 # invalidate the slow layer above. Reading the list out of pyproject rather than
@@ -74,6 +80,22 @@ RUN pip install --no-cache-dir --no-deps --no-build-isolation . \
 # Runtime
 # ---------------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
+
+# The Python OCR extra installs `pytesseract`, but that package is only a
+# wrapper: the Tesseract executable and its language data are OS packages.
+# Install both when the same build arg asks for OCR, so `BACKEND_EXTRAS=ocr`
+# actually produces a working local engine instead of an ImportError at the
+# first photo. The language pack is explicit (`eng`) because Debian's
+# `tesseract-ocr` package does not guarantee English data is pulled in.
+ARG INSTALL_EXTRAS=""
+RUN case " ${INSTALL_EXTRAS} " in \
+        *" ocr "*) \
+            apt-get update \
+            && apt-get install -y --no-install-recommends \
+                tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
+            && rm -rf /var/lib/apt/lists/* \
+            ;; \
+    esac
 
 # Refuse to buffer or write .pyc files: logs must reach `docker logs`
 # unbuffered, and a read-only-ish app dir should not accumulate bytecode.

@@ -479,6 +479,108 @@ def ensure_bundle_experiments(db: Session, workspace_id: uuid.UUID) -> None:
     db.flush()
 
 
+def ensure_bundle_tuning(db: Session, workspace_id: uuid.UUID) -> None:
+    """Publish the run's bounded hyperparameter search as experiments.
+
+    One ``experiments`` row per trial in the serving bundle's ``tuning``
+    section, so the screen lists the configurations the training run actually
+    scored on the validation tail — with the same rows the bundle exported
+    from ``tuning_trials.parquet``, not a re-derived or invented result.
+
+    ``mae`` is the trial's *validation-tail* MAE and ``baseline_mae`` is the
+    documented default configuration's MAE on the same tail; the relative
+    difference is the search's measured effect, which is what selecting a
+    configuration is based on. Coverage is left empty: tuning scores point
+    accuracy only, so there is no interval to report.
+
+    Matching is by experiment name (model version + trial index), so re-running
+    the export backfills a missing figure and never duplicates a trial.
+
+    Args:
+        db: Database session.
+        workspace_id: Workspace to register the trials for.
+    """
+    bundle = get_bundle()
+    if bundle is None:
+        return
+    tuning = bundle.get("tuning")
+    if not isinstance(tuning, dict):
+        return
+    trials = tuning.get("trials")
+    if not isinstance(trials, list) or not trials:
+        return
+
+    model_version = str(tuning.get("model_version") or "unknown")
+    try:
+        best_trial = int(tuning.get("best_trial"))
+    except (TypeError, ValueError):
+        best_trial = -1
+    default_mae = _float_or_none(tuning.get("default_validation_mae"))
+    split = str(tuning.get("selection_split") or "validation_tail")
+    metric = str(tuning.get("selection_metric") or "validation_mae")
+    now = datetime.datetime.now(datetime.UTC)
+
+    for raw in trials:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            trial_no = int(raw.get("trial"))
+        except (TypeError, ValueError):
+            continue
+        selected = bool(raw.get("selected")) or trial_no == best_trial
+        params = raw.get("params")
+        name = f"Validation-tail tuning — {model_version} — trial {trial_no + 1}"
+
+        exp: Experiment | None = db.scalar(
+            select(Experiment)
+            .where(Experiment.workspace_id == workspace_id, Experiment.name == name)
+            .limit(1)
+        )
+        mae = _float_or_none(raw.get("validation_mae"))
+        if exp is None:
+            exp = Experiment(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                name=name,
+                hypothesis=(
+                    "Selected configuration: lowest validation-tail MAE of the "
+                    "bounded search."
+                    if selected
+                    else "Bounded-search configuration scored on the same validation "
+                    "tail; not selected."
+                ),
+                config={
+                    "algorithm": "lightgbm",
+                    "feature_set": tuning.get("feature_set_version"),
+                    "source": "training_run_tuning",
+                    "model_version": model_version,
+                    "trial": trial_no,
+                    "max_trials": tuning.get("max_trials"),
+                    "best_trial": best_trial,
+                    "selected": selected,
+                    "selection_split": split,
+                    "selection_metric": metric,
+                    "params": params if isinstance(params, dict) else {},
+                    "improvement": _float_or_none(tuning.get("improvement")),
+                },
+                status="completed",
+                mae=mae,
+                baseline_mae=default_mae,
+                coverage=None,
+                created_by=None,
+                finished_at=now,
+                created_at=now,
+            )
+            db.add(exp)
+        else:
+            # Backfill figures an earlier bundle left blank; never overwrite.
+            if exp.mae is None:
+                exp.mae = mae
+            if exp.baseline_mae is None:
+                exp.baseline_mae = default_mae
+    db.flush()
+
+
 def get_stub_model(db: Session, workspace_id: uuid.UUID) -> ModelVersion:
     """Find-or-create the row that records a forecast no model produced.
 

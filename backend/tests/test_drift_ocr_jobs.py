@@ -7,6 +7,7 @@ fabricated OCR rows, hardcoded drift signals, and a placeholder jobs module.
 
 from __future__ import annotations
 
+import base64
 import datetime
 import uuid
 
@@ -16,6 +17,12 @@ from app.jobs.runner import JOBS, enqueue_run, run_job
 from app.jobs.scheduler import cron_matches, due_jobs
 from app.services.drift import population_stability_index
 from app.services.ingestion.image import parse_ocr_text, preview_for_image
+
+# A real 1x1 PNG: the upload route validates content, so a fake byte string is
+# no longer a valid stand-in for "an image the OCR engine read nothing from".
+_ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+)
 
 # --------------------------------------------------------------- OCR parser ---
 
@@ -32,6 +39,93 @@ def test_parse_ocr_text_handles_iso_and_text_month() -> None:
     rows = parse_ocr_text("2026-01-12 112\n3 Jan 2026 44")
     assert [r["date"] for r in rows] == ["2026-01-12", "2026-01-03"]
     assert [r["demand_qty"] for r in rows] == [112, 44]
+
+
+def test_parse_ocr_text_handles_month_first_text_dates() -> None:
+    """A US-style log writes "Oct 1", not "1 Oct".
+
+    This is the layout operators actually photograph (month name, day, then
+    the visitor count), and the parser used to only accept the day-first form,
+    so a clear printed sheet came back as zero rows.
+    """
+    rows = parse_ocr_text("Oct 1 58\nOct 2 47\nOctober 12, 2026 73")
+    year = datetime.datetime.now(datetime.UTC).year
+    assert [r["date"] for r in rows] == [
+        f"{year}-10-01",
+        f"{year}-10-02",
+        "2026-10-12",
+    ]
+    assert [r["demand_qty"] for r in rows] == [58, 47, 73]
+
+
+def test_parse_ocr_text_recovers_a_one_read_as_a_letter() -> None:
+    """Tesseract reads a printed 1 as l/I in a month-first date.
+
+    "Oct l" is still unmistakably the first of October to a human, so the
+    parser normalises the glyph instead of dropping that day from the sheet.
+    """
+    rows = parse_ocr_text("Oct l 58\nOct I2 73\nOct l0 40")
+    year = datetime.datetime.now(datetime.UTC).year
+    assert [r["date"] for r in rows] == [
+        f"{year}-10-01",
+        f"{year}-10-12",
+        f"{year}-10-10",
+    ]
+    assert [r["demand_qty"] for r in rows] == [58, 73, 40]
+
+
+def test_parse_ocr_text_does_not_turn_a_bare_month_year_into_a_day() -> None:
+    # "October 2026" is a heading, not a row. Reading the first two year digits
+    # as a day used to make it look like one.
+    assert parse_ocr_text("October 2026\nTotal 112") == []
+
+
+def test_parse_ocr_text_accepts_month_first_when_unambiguous() -> None:
+    """A US date such as 12/31 cannot be day-first, and it sets the sheet order.
+
+    The ambiguous 01/02 row must follow the convention the rest of the photo
+    proved, not flip back to the default just because it can be read both ways.
+    """
+    rows = parse_ocr_text("12/31/2026 100\n01/02/2026 90")
+    assert [r["date"] for r in rows] == ["2026-12-31", "2026-01-02"]
+
+
+def test_parse_ocr_text_accepts_day_first_when_unambiguous() -> None:
+    rows = parse_ocr_text("31/12/2026 100\n01/02/2026 90")
+    assert [r["date"] for r in rows] == ["2026-12-31", "2026-02-01"]
+
+
+def test_parse_ocr_text_defaults_ambiguous_numeric_dates_to_day_first() -> None:
+    rows = parse_ocr_text("01/02/2026 90")
+    assert rows[0]["date"] == "2026-02-01"
+
+
+def test_parse_ocr_text_can_be_told_the_date_order() -> None:
+    """Callers that know their locale can resolve an otherwise ambiguous row."""
+    rows = parse_ocr_text("01/02/2026 90", day_first=False)
+    assert rows[0]["date"] == "2026-01-02"
+
+
+def test_parse_ocr_text_expands_a_two_digit_year_in_either_order() -> None:
+    month_first = parse_ocr_text("12/31/26 100")
+    day_first = parse_ocr_text("31/12/26 100")
+    assert month_first[0]["date"] == "2026-12-31"
+    assert day_first[0]["date"] == "2026-12-31"
+
+
+def test_parse_ocr_text_skips_an_impossible_numeric_date() -> None:
+    assert parse_ocr_text("13/13/2026 100") == []
+
+
+def test_parse_ocr_text_recovers_a_seven_read_as_slash() -> None:
+    """Tesseract often reads a terminal 7 as '/': "2/" is a count of 27.
+
+    The row is still flagged ambiguous, because the correction is a heuristic
+    and the operator must confirm it rather than trust a 0.9 legibility score.
+    """
+    rows = parse_ocr_text("2026-10-20   2/")
+    assert rows[0]["demand_qty"] == 27
+    assert rows[0]["confidence"] < 0.9
 
 
 def test_parse_ocr_text_skips_lines_without_both_fields() -> None:
@@ -63,18 +157,28 @@ def test_ocr_preview_names_the_engine_that_read_the_photo() -> None:
     preview = preview_for_image(b"not-an-image", "log.jpg")
     assert preview["engine"] == ENGINE_NONE
     # ...and the note says why, rather than implying the photo was blank.
-    assert "engine" in preview["note"].lower() or "configured" in preview["note"].lower()
+    note = preview["note"].lower()
+    assert any(
+        reason in note for reason in ("engine", "configured", "look like an image", "valid image")
+    )
 
     # With Tesseract available the engine is reported as the local parser.
     monkeypatch = pytest.MonkeyPatch()
     try:
+        from app.services.ingestion.image import ImageExtraction
+
         monkeypatch.setattr(
-            "app.services.ingestion.image._extract_via_tesseract",
-            lambda content, language: parse_ocr_text("12/01/2026   112"),
+            "app.services.ingestion.image._tesseract_extraction",
+            lambda content, language: ImageExtraction(
+                rows=parse_ocr_text("12/01/2026   112"),
+                engine=ENGINE_TESSERACT,
+                quality={"page_segmentation_mode": 6, "mean_confidence": 0.91},
+            ),
         )
-        preview = preview_for_image(b"pretend-image", "log.jpg")
+        preview = preview_for_image(_ONE_PIXEL_PNG, "log.jpg")
         assert preview["engine"] == ENGINE_TESSERACT
         assert preview["row_count"] == 1
+        assert preview["quality"]["mean_confidence"] == 0.91
     finally:
         monkeypatch.undo()
 

@@ -12,7 +12,7 @@ Chapters: **3.4-3.11** features & ingestion, **3.12-3.15** models & metrics (MAE
 | File | Purpose | Key API |
 | --- | --- | --- |
 | `ModelRegistry.tsx` | Registry `algorithm, MAE/RMSE/RMSLE, status` | `GET /models`, `GET /models/{id}` |
-| `Experiments.tsx` | Backtests `POST /experiments` + fold MAE/coverage | `GET /experiments`, `GET /experiments/{id}` |
+| `Experiments.tsx` | Published backtests + tuning trials (read-only; `POST /experiments` is 501) | `GET /experiments`, `GET /experiments/{id}`, `POST /experiments/{id}/submit` |
 | `FeatureStore.tsx` | Feature defs + coverage + leakage_safe | `GET /features`, `GET /features/{name}/coverage` |
 | `ForecastExplainer.tsx` | SHAP `feature, value, impact` | `GET /forecasts/{id}/explanation`, `GET /models/{id}/importance` |
 | `PolicyLab.tsx` | Simulate `surplus_sr/ps`, `unmet_ud` trade | `POST /policies/simulate`, `GET /policies` |

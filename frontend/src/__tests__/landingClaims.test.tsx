@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Landing } from '../pages/Landing';
 import { evidencePoints } from '../data/landing';
 
@@ -11,6 +11,12 @@ import { evidencePoints } from '../data/landing';
 
 function renderLanding() {
   return render(<Landing onSignIn={() => {}} onGetStarted={() => {}} />);
+}
+
+/** The figures live in the "Why it matters" tab panel, which is not mounted
+ *  while another tab is active. Activate it before asserting on its content. */
+function openEvidenceTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /why it matters/i }));
 }
 
 describe('landing evidence figures', () => {
@@ -59,6 +65,7 @@ describe('landing performance claims', () => {
      lives in the evidence row and names its report. */
   it('keeps every published figure inside the sourced evidence row', () => {
     renderLanding();
+    openEvidenceTab();
     for (const point of evidencePoints) {
       const value = screen.getByText(point.value);
       expect(value.closest('li')?.textContent).toContain(point.source);
@@ -71,6 +78,7 @@ describe('landing performance claims', () => {
 
   it('attributes each figure to a source on the page itself', () => {
     renderLanding();
+    openEvidenceTab();
     for (const point of evidencePoints) {
       const value = screen.getByText(point.value);
       const item = value.closest('li');

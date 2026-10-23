@@ -48,8 +48,8 @@ Base URL: `/api/v1` — **177 paths → 213 items** (`openapi.json` via `backend
 | `POST`   | `/ingest/file`                     | Multipart CSV or XLSX. Returns `upload_id`, detected headers and the first 5 parsed rows for preview.                              |
 | `POST`   | `/ingest/file/{upload_id}/mapping` | Body: `{ column_map: { date, demand_qty, location } }`. Validates the mapping and returns a dry-run row count plus any row errors. |
 | `POST`   | `/ingest/file/{upload_id}/commit`  | Commits the mapped rows into `demand_observations`.                                                                                |
-| `POST`   | `/ingest/image`                    | Multipart image of a handwritten log. Queues OCR, returns `job_id`.                                                                |
-| `GET`    | `/ingest/image/{job_id}`           | OCR status and extracted rows for review. Each row carries `confidence`; `engine` (`remote` \| `tesseract` \| `none`) says which engine read it, because a vision service returns a model score while the local parser's value counts how many numbers were left on the line — a readability signal, not a probability. |
+| `POST`   | `/ingest/image`                    | Multipart image of a handwritten log. Validates the content and runs OCR, returning `job_id`; **400 `invalid_image`** for non-images or oversized pixel counts. |
+| `GET`    | `/ingest/image/{job_id}`           | OCR status and extracted rows for review. Each row carries `confidence`; `engine` (`remote` \| `tesseract` \| `none`) says which engine read it, because a vision service returns a model score while the local parser's value counts how many numbers were left on the line — a readability signal, not a probability. `quality` carries measured engine metadata (`mean_confidence`, `page_segmentation_mode`, decoded width/height/format), separate from the row score. |
 | `POST`   | `/ingest/image/{job_id}/commit`    | Commits corrected OCR rows.                                                                                                        |
 | `GET`    | `/ingest/uploads`                  | Recent uploads with status, row counts and errors.                                                                                 |
 | `GET`    | `/ingest/demand`                   | Stored demand rows, newest first. Filters: `location_id`, `upload_id` (the rows one import wrote), `limit` ≤ 50, `offset`. Each row reports `source` and its provenance — `upload_id` / `upload_filename`, `null` for a row that never came from a file. |
@@ -143,13 +143,14 @@ Base URL: `/api/v1` — **177 paths → 213 items** (`openapi.json` via `backend
 | `GET`        | `/models`                   | Registry rows: algorithm, MAE, RMSE, RMSLE, status.                                |
 | `GET`        | `/models/serving`           | **Live** What forecasts are answered with now, beside the row marked production. `configuration` reports the serving mode (`trained`/`stub`/`error`) and whether `MODEL_BUNDLE_PATH` named the export or it was discovered. |
 | `GET`        | `/models/{id}`              | Detail with hyperparameters, training window and calibration.                      |
-| `POST`       | `/models/train`             | Queues a training run. Body: `algorithm`, `feature_set`, `params`.                 |
+| `POST`       | `/models/train`             | **501** — this API does not train. Run the `model/` pipeline and export the bundle. |
 | `POST`       | `/models/{id}/promote`      | Raises a promotion change request (two-person rule).                               |
 | `POST`       | `/models/{id}/rollback`     | Restores the previous production version.                                          |
 | `GET`        | `/models/{id}/calibration`  | Target vs empirical coverage, mean interval width.                                 |
 | `GET`        | `/models/{id}/importance`   | Aggregate feature importance.                                                      |
-| `GET` `POST` | `/experiments`              | Backtests. `POST` body: `name`, `hypothesis`, `algorithm`, `feature_set`, `folds`. |
-| `GET`        | `/experiments/{id}`         | Fold-level MAE, coverage, baseline delta.                                          |
+| `GET`        | `/experiments`              | Published rolling-origin backtests and validation-tail tuning trials (from the serving bundle). |
+| `POST`       | `/experiments`              | **501** — this API does not run backtests; export a bundle instead.                 |
+| `GET`        | `/experiments/{id}`         | Fold-level MAE/coverage (backtest) or a tuning trial's validation MAE vs the default config. |
 | `POST`       | `/experiments/{id}/submit`  | Sends the winning config to the approvals queue.                                   |
 | `GET`        | `/features`                 | Feature definitions with coverage and leakage status.                              |
 | `GET`        | `/features/{name}/coverage` | Per-location coverage for one feature.                                             |

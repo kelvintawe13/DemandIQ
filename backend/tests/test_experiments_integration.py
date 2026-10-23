@@ -170,7 +170,14 @@ def test_detail_exposes_folds_and_created_at_round_trips() -> None:
         assert stored.created_at is not None
 
 
-def test_create_persists_and_then_appears_in_the_list() -> None:
+def test_create_is_refused_and_leaves_no_row() -> None:
+    """A request cannot fabricate a backtest it never ran.
+
+    The endpoint used to insert a ``completed`` experiment whose MAE and
+    coverage came from ``uuid4()``, so the screen showed a measured result that
+    no run produced. The refusal must also write nothing: a rejected request
+    that still leaves a row would be the same lie in a different place.
+    """
     ws_id, user_id, _ = _seed("Experiments")
     client = _client(user_id)
 
@@ -184,12 +191,14 @@ def test_create_persists_and_then_appears_in_the_list() -> None:
             "folds": 2,
         },
     )
-    assert resp.status_code == 201, resp.text
-    created = resp.json()
-    assert len(created["folds"]) == 2
+    assert resp.status_code == 501, resp.text
+    assert resp.json()["error"]["code"] == "backtests_not_run_here"
 
-    # Visible to a brand-new session (the insert really committed).
-    resp = client.get("/api/v1/experiments")
-    assert resp.status_code == 200, resp.text
-    names = {row["name"] for row in resp.json()["data"]}
-    assert "Created by API" in names
+    with _session_factory()() as db:
+        names = {
+            row.name
+            for row in db.scalars(
+                select(Experiment).where(Experiment.workspace_id == ws_id)
+            )
+        }
+    assert "Created by API" not in names

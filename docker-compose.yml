@@ -1,8 +1,8 @@
 # DemandIQ — containerised stack.
 #
 #   docker compose up -d --build     postgres, redis, migrations, API, web
-#   open http://localhost:5173/app/  the product UI
-#   open http://localhost:5173/       the OpenAPI console (proxied to the API)
+#   open http://localhost:5173/       the product UI
+#   open http://localhost:5173/console the OpenAPI console (proxied to the API)
 #
 # What changed from the previous version, and why:
 #
@@ -185,6 +185,14 @@ services:
     <<: *api-common
     command: ["python", "-m", "app.jobs.worker"]
     profiles: ["worker"]
+    # The worker runs no HTTP server, so the API image's /api/v1/health probe
+    # would always fail. Check the process it is actually running instead.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -aq app.jobs.worker /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy

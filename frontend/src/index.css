@@ -821,6 +821,15 @@ body,
 .dark .bg-amber-50\/60 {
   background-color: rgba(245, 158, 11, 0.12);
 }
+
+/* Landing-page ambient glows: tinted light that must stay a glow, not paint a
+   pale disc over the dark canvas. */
+.dark .bg-brand-200\/50 {
+  background-color: rgba(23, 162, 148, 0.12);
+}
+.dark .bg-amber-200\/30 {
+  background-color: rgba(245, 158, 11, 0.08);
+}
 .dark .bg-slate-50\/70,
 .dark .bg-slate-50\/60,
 .dark .bg-slate-50\/50 {

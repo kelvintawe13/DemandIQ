@@ -76,6 +76,11 @@ def _num(value: object) -> float | None:
     return out if np.isfinite(out) else None
 
 
+def _plain(value: object) -> object:
+    """A numpy scalar as a plain Python value (joblib payloads stay JSON-safe)."""
+    return value.item() if hasattr(value, "item") else value
+
+
 def _finite_pairs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     y = df["visitors"].to_numpy(dtype="float64")
     p = df["prediction"].to_numpy(dtype="float64")
@@ -218,6 +223,7 @@ def export_bundle(run_dir: Path) -> dict:
     # Point-accuracy metrics for the API's model registry (``model_versions``):
     # the backend cannot import this package, so the figures travel with the
     # bundle rather than being re-derived (or faked) at serving time.
+    model_version = f"lightgbm-{meta['feature_set_version']}-it{lgb_stage['best_iteration']}"
     metrics = {
         "mae": lgb_stage.get("mae"),
         "rmse": lgb_stage.get("rmse"),
@@ -326,6 +332,71 @@ def export_bundle(run_dir: Path) -> dict:
             },
         }
 
+    # ------------------------------------- bounded validation-tail tuning
+    # The search's trials and selection travel with the bundle so the console
+    # lists the configurations the run actually scored on the validation tail,
+    # not a claim about tuning. Both artifacts are required: a selection with
+    # no trial table is dropped rather than published without its evidence.
+    tuning: dict[str, object] | None = None
+    tuning_best_path = run_dir / "tuning_best.joblib"
+    tuning_trials_path = run_dir / "tuning_trials.parquet"
+    if tuning_best_path.exists() and tuning_trials_path.exists():
+        best_payload = joblib.load(tuning_best_path)
+        trial_rows: list[dict[str, object]] = []
+        if isinstance(best_payload, dict):
+            for record in pd.read_parquet(tuning_trials_path).to_dict("records"):
+                try:
+                    trial_no = int(record["trial"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                trial_rows.append(
+                    {
+                        "trial": trial_no,
+                        "params": {
+                            key: _plain(record[key])
+                            for key in (
+                                "learning_rate",
+                                "num_leaves",
+                                "min_data_in_leaf",
+                                "feature_fraction",
+                            )
+                            if record.get(key) is not None
+                        },
+                        "validation_mae": _num(record.get("validation_mae")),
+                        "validation_rmse": _num(record.get("validation_rmse")),
+                        "validation_rmsle": _num(record.get("validation_rmsle")),
+                        "validation_mase": _num(record.get("validation_mase")),
+                        "best_iteration": (
+                            int(iter_value)
+                            if (iter_value := _num(record.get("best_iteration"))) is not None
+                            else None
+                        ),
+                        "selected": bool(record.get("selected", False)),
+                    }
+                )
+        try:
+            best_trial = int(best_payload.get("best_trial"))  # type: ignore[union-attr]
+        except (AttributeError, TypeError, ValueError):
+            best_trial = -1
+        if trial_rows and any(t["trial"] == best_trial for t in trial_rows):
+            tuning = {
+                "model_version": model_version,
+                "feature_set_version": meta["feature_set_version"],
+                "selection_split": best_payload.get("selection_split", "validation_tail"),
+                "selection_metric": best_payload.get("selection_metric", "validation_mae"),
+                "max_trials": int(best_payload.get("max_trials", len(trial_rows))),
+                "best_trial": best_trial,
+                "best_params": {
+                    str(k): _plain(v) for k, v in (best_payload.get("best_params") or {}).items()
+                },
+                "default_validation_mae": _num(best_payload.get("default_validation_mae")),
+                "best_validation_mae": _num(best_payload.get("best_validation_mae")),
+                "improvement": _num(best_payload.get("improvement")),
+                "trials": trial_rows,
+            }
+        else:
+            print("WARNING: tuning artifacts are incomplete; bundle will lack tuning")
+
     # -------------------------------------------- rolling-origin backtest
     # The run's own expanding-window evaluation travels with the bundle so the
     # console's Experiments screen lists the folds the run actually scored,
@@ -373,7 +444,7 @@ def export_bundle(run_dir: Path) -> dict:
             backtest = {
                 "n_folds": len(folds_out),
                 "algorithm": "lightgbm",
-                "model_version": f"lightgbm-{meta['feature_set_version']}-it{lgb_stage['best_iteration']}",
+                "model_version": model_version,
                 "feature_set_version": meta["feature_set_version"],
                 "baseline_name": metrics["baseline_name"],
                 "baseline_mae": metrics["baseline_mae"],
@@ -409,7 +480,7 @@ def export_bundle(run_dir: Path) -> dict:
         "run_dir": str(run_dir),
         "model": {
             "algorithm": "lightgbm",
-            "version": f"lightgbm-{meta['feature_set_version']}-it{lgb_stage['best_iteration']}",
+            "version": model_version,
             "booster": wrapper.booster_,
             "best_iteration": int(lgb_stage["best_iteration"]),
             "feature_columns": list(meta["feature_columns"]),
@@ -439,6 +510,7 @@ def export_bundle(run_dir: Path) -> dict:
         },
         "metrics": metrics,
         "comparison": comparison,
+        "tuning": tuning,
         "backtest": backtest,
         "provenance": {
             "seed": stages["ingest"]["seed"],
