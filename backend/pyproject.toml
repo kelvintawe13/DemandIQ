@@ -25,6 +25,9 @@ dependencies = [
     "pyotp>=2.9.0",
     "email-validator>=2.0.0",
     "openpyxl>=3.1.0",
+    # Report rendering. CSV is written by hand; XLSX uses openpyxl above, and
+    # PDF needs a real writer — see services/reporting/render.py.
+    "reportlab>=4.0.0",
 ]
 
 [project.optional-dependencies]

@@ -72,8 +72,9 @@ Documents the 10 major route pages (single-file views) that compose the DemandIQ
 **Status:** Implemented prototype  
 **Proposal:** `ARCHITECTURE.md` §6 async reporting to object store; `GET /analytics/*` aggregation for export.  
 **File map:** `Reports.tsx` + `components/ui/DateRangeModal.tsx`, `LocationPickerModal.tsx`  
-**Contracts:** `GET /reports/templates`, `POST /reports/generate { template_id, period, format, location_ids[] }` → `{ report_id }`, `GET /reports/{id}` (signed URL when ready), `GET /reports`, `GET /reports/schedules`, `POST/PATCH/DELETE /reports/schedules[/{id}]`.  
+**Contracts:** `GET /reports/templates`, `POST /reports/generate { template_id, period, format, location_ids[] }` → `{ report_id, status:'queued' }`, `GET /reports/{id}` (adds a signed `download_url` once the worker has rendered the file, plus `size_bytes`, `content_type` and `error`), `GET /reports/{id}/download?expires&sig` (the bytes themselves), `GET /reports`, `GET /reports/schedules`, `POST/PATCH/DELETE /reports/schedules[/{id}]`.  
 **Formats:** `format in (pdf,csv,xlsx)` (`reports.format CHECK`, `schema.sql:337`).
+**Async:** generation only queues the row — the `report_generation` job renders it on its next tick and stores the file on the row. The page polls while a report is in flight, so a queued report turns into a Download on its own, and a failed one shows why instead of a bare status.
 
 ## Settings — `Settings.tsx` — `/settings`
 **Status:** Implemented prototype  

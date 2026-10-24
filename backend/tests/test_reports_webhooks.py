@@ -142,14 +142,16 @@ def test_report_generate_and_poll() -> None:
     assert "report_id" in body
     rid = body["report_id"]
 
-    # Poll GET /reports/{id} should return completed + signed_url
+    # Generation is queued, not stubbed: the row exists, the file does not yet,
+    # and no download link is offered until the worker has rendered it — see
+    # test_report_render.py for the rendering half of that contract.
     resp = client.get(f"/api/v1/reports/{rid}")
     assert resp.status_code == 200, resp.text
     detail = resp.json()
     assert detail["id"] == rid
-    assert detail["status"] == "completed"
-    assert detail["signed_url"] is not None
-    assert "sig=" in detail["signed_url"]
+    assert detail["status"] == "queued"
+    assert detail["signed_url"] is None
+    assert detail["download_url"] is None
 
     # List with pagination
     resp = client.get("/api/v1/reports?limit=1")

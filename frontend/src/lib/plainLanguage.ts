@@ -28,6 +28,8 @@ export function plainStatus(status?: string | null): string {
     queued: 'Waiting to start',
     pending: 'Waiting to start',
     running: 'Running now',
+    // The report worker sets this between claiming a row and writing its file.
+    rendering: 'Rendering now',
     syncing: 'Syncing now',
     success: 'Succeeded',
     completed: 'Completed',

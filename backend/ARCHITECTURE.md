@@ -11,7 +11,7 @@ contract the implementation must satisfy.
  ─────────────────   ───────────────   ─────────────────────   ─────────────────
  Web app (React)  ─┐                ┌─ Ingestion & Normalise ─┐
  Mobile / PWA     ─┼─► FastAPI ─────┼─ Forecasting            ├─► PostgreSQL
- SMS / USSD       ─┤   (REST +      ├─ Policy Simulation      ├─► Object store
+ Enrolled tills   ─┤   (REST +      ├─ Policy Simulation      ├─► Object store
  POS / MoMo hooks ─┤    auth +      ├─ Explainability         │   (uploads,
  Partner API      ─┘    rate limit) ├─ Quality & Alerts       │    artifacts)
                                     └─ Reporting / Webhooks   └─► Redis (queue,
@@ -23,32 +23,45 @@ to a model or the database directly.
 
 ## 1. Ingestion — many shapes, one schema
 
-Six inbound channels exist, and they all resolve to the same row:
+The proposal's design envelope is six inbound channels; **five have an adapter in
+this backend today**, and all five resolve to the same row:
 
 | Channel | Transport | Normalisation work |
 | --- | --- | --- |
-| POS connector | OAuth + polling | Group transactions by service day, drop refunds and voids, count covers |
-| Mobile money | Webhook | Same grouping; payer identity is discarded at the edge |
-| Spreadsheet | Upload | Sniff delimiter and encoding, parse dates, apply the user's column mapping |
-| Handwritten photo | Upload | Validate/decode, orient and normalise, OCR (remote service or local Tesseract) to candidate rows, always human-confirmed before commit |
-| Manual entry | REST | Direct, still validated |
-| SMS / USSD | Gateway | Parse `DATE COVERS` shorthand, reply with a confirmation |
+| Manual entry | `POST /ingest/manual` | Validated row by row; a bad row is reported with its index and the good rows still commit |
+| Spreadsheet | Upload (`POST /ingest/file`) | Sniff delimiter and encoding, find the header under title/date-range lines, skip `TOTAL`/blank/`n/a` furniture, apply the user's column mapping |
+| Photo | Upload (`POST /ingest/image`) | Validate and decode, flatten the lighting, deskew, read candidate rows with the remote service or local Tesseract, always human-confirmed before commit |
+| Enrolled till | `POST /devices/{id}/demand` with `X-Device-Key` | Workspace and location come from the device credential, never from the request body |
+| POS / MoMo connector | Polling pull (`POST /connectors/{id}/pull`) and the queued sync job | Map provider fields onto the canonical four through a stored `ConnectorMapping`, coercing types |
 
-The canonical row is `(location_id, date, demand_qty, source, recorded_at)`.
+Mobile money is a connector type on that pull path, not a webhook: **no inbound
+webhook writes demand**. `sms` is a reserved connector type with no parser, so
+the proposal's SMS/USSD channel is not implemented.
 
-Commit rules, enforced in one place so no channel can bypass them:
+The canonical row is `(workspace_id, location_id, date, demand_qty, notes,
+recorded_at)`. There is no `source` column: the channel is written as a
+`[source:<tag>]` note, beside `upload_id` or `source_id` where one applies, and
+`GET /ingest/demand` reads the tag back as `source`.
+
+Commit rules, enforced in one place
+(`services/ingestion/normaliser.py::commit_demand`) so no channel can bypass them:
 
 1. **Idempotent by `(location_id, date)`.** A second submission for a day that
-   already exists is a *reconciliation*, not an insert. The newer value wins and
-   the prior value is kept in the audit trail.
-2. **No future dates.** A row dated after the service day is rejected.
-3. **Every row keeps its source.** Traceability is required for the quality
-   monitor and for any later dispute.
-4. **Uploads are staged, not committed.** Parsed rows sit in `ingest_uploads`
-   with a preview until the operator confirms in the UI.
+   already exists is a *reconciliation*, not an insert: the newer value wins, and
+   the previous quantity is returned as `previous_qty`, logged, and fanned out to
+   devices so they apply the same last-write-wins rule.
+2. **No future dates.** A row dated after the workspace's local service day is
+   rejected, because "has tomorrow started here?" is a local question, not a UTC one.
+3. **The quantity is bounded** to `0 … 10,000,000` — a typo guard, not a storage limit.
+4. **Every row keeps its channel**, as the note tag above, so the quality monitor
+   can attribute it without a JOIN.
+5. **Uploads are staged, not committed.** Parsed rows sit in `ingest_uploads`
+   with a preview until the operator confirms in the UI; deleting the upload
+   removes the rows it wrote.
 
-Ingestion emits `ingestion.completed` or `ingestion.failed`, which drives the
-quality monitor, alerts and outbound webhooks.
+A committed row is published on the demand topic so connected tills update
+immediately. That publish is best-effort: a realtime failure never fails an
+ingestion that has already reached the database.
 
 ## 2. Feature build — the leakage boundary
 
@@ -116,14 +129,40 @@ attribution, not causal effect.
 
 ## 6. Quality, alerts and reporting
 
-Quality rules run on every commit: gaps in the series, implausible spikes,
-duplicate-day conflicts across channels, stale connectors, and schema drift.
-Failures raise scored issues with a suggested fix. Alert rules watch forecast
-error, coverage breaches, drift against the training distribution, and
-connector health, and fan out in-app, by email, and to webhooks.
+**Quality rules are declared, not evaluated.** `GET /quality/rules` seeds the
+five rule records the UI shows — gaps in the series, implausible spikes,
+duplicate-day conflicts across channels, stale connectors and schema drift — and
+an admin can enable or disable them, but nothing reads that flag: no check runs
+on commit or in a job, and no code path inserts a `QualityIssue`. `GET
+/quality/issues` is therefore limited to rows inserted by hand, and `GET
+/quality/score` starts at 100, subtracts per open issue, and reports the
+remaining dimensions as fixed offsets of that same number.
 
-Reports are generated asynchronously into the object store; the API returns a
-job id, and the UI polls or waits for the completion event.
+**Alerts** come from two paths only: the hourly `drift_check` job, which raises
+one alert per incident when drift crosses its threshold, and a failed pipeline
+job, which is resolved by that job's next success. Alert *rules* are CRUD —
+create, edit, delete — with no evaluator behind them. A raised alert appears
+in-app. Its webhook fan-out writes one delivery row per subscribed endpoint
+without transmitting anything yet, and no alert is emailed: the `smtp_*`
+settings are read only to decide whether email verification is required.
+
+**Reports are rendered by a worker.** `POST /reports/generate` inserts the row as
+`queued` and returns; the `report_generation` job (every minute, five rows per
+tick) reads the workspace's own tables, renders the document in the requested
+format and stores the bytes on the row (`reports.content`, migration 022),
+then marks it `completed`. A render that throws marks the row `failed` and keeps
+the reason in `reports.error`, so a bad template is visible on `GET /reports/{id}`
+rather than only in a job log.
+
+Each template reports data this system actually holds: demand rows, forecasts
+scored against realised demand, persisted policy simulations, and uploads beside
+demand coverage. A template with nothing to report says so — the waste report
+prints "no policy simulation covers this period" instead of zeros that read as
+results.
+
+`GET /reports/{id}/download` serves the stored bytes, authorised by an expiring
+HMAC link (`expires` + `sig`) because the browser opens it directly; the link is
+`null` until the file exists.
 
 ## 7. Governance
 
@@ -151,4 +190,5 @@ Every one of these surfaces in the UI through the shared `EmptyState` or
 - Forecast read: p95 under 300 ms (served from `forecasts`, not recomputed).
 - On-demand forecast: p95 under 2 s.
 - Nightly batch for 10k locations: under 20 minutes.
-- Ingestion webhook acknowledgement: under 500 ms, processing asynchronous.
+- Ingestion write acknowledgement: p95 under 500 ms; pulls and OCR runs are
+  queued as background jobs.

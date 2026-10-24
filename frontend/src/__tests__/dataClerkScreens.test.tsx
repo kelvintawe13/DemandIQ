@@ -40,6 +40,8 @@ vi.mock('../api/client', () => ({
     reference = null;
   },
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  // The real helper prefixes VITE_API_URL; unset in tests, so a path stays one.
+  apiUrl: (path: string) => path,
 }));
 
 import { api } from '../api/client';
@@ -278,6 +280,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // The report poller runs on an interval; a test that faked timers has to hand
+  // the real clock back or every later test inherits them.
+  vi.useRealTimers();
 });
 
 /* ------------------------------------------------------------------- reports */
@@ -363,6 +368,103 @@ describe('Reports as a Data Clerk', () => {
     await waitFor(() => expect(within(dialog).getByText('Waiting to start')).toBeInTheDocument());
     expect(within(dialog).getByText(/still being produced/i)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check status' })).toBeInTheDocument();
+  });
+
+  it('downloads a completed report from its row through the signed link', async () => {
+    // The list carries no link (one per row on every page load would be minted
+    // for rows nobody opens), so the row's Download reads the row's own record
+    // and opens what the API signs for it. It used to only open the dialog.
+    const user = userEvent.setup();
+    const signed =
+      '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3/download?expires=1760000000&sig=abc123';
+    mockGet.mockImplementation((path: string) =>
+      path === '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3'
+        ? Promise.resolve({
+            id: 'b474cfb0-dce0-49bc-b78f-f6ccc8950ac3',
+            template: 'demand_summary',
+            format: 'pdf',
+            status: 'completed',
+            download_url: signed,
+            signed_url: signed,
+            size_bytes: 2524,
+            created_at: ISO,
+          })
+        : routeGet(path),
+    );
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<Reports />);
+
+    await user.click(await screen.findByRole('button', { name: /^Download / }));
+
+    await waitFor(() => expect(open).toHaveBeenCalledWith(signed, '_blank', 'noopener,noreferrer'));
+  });
+
+  it('polls an open report until the worker finishes it', async () => {
+    // ``POST /reports/generate`` only queues the row; the worker renders it on
+    // its next tick. Without a poll the dialog kept the status it opened with,
+    // so a finished file only appeared after closing and reopening it.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let reads = 0;
+    mockGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3') {
+        reads += 1;
+        return Promise.resolve(
+          reads === 1
+            ? { id: 'b474cfb0-dce0-49bc-b78f-f6ccc8950ac3', format: 'pdf', status: 'queued', size_bytes: null }
+            : {
+                id: 'b474cfb0-dce0-49bc-b78f-f6ccc8950ac3',
+                template: 'demand_summary',
+                format: 'pdf',
+                status: 'completed',
+                download_url: '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3/download?expires=1&sig=a',
+                signed_url: '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3/download?expires=1&sig=a',
+                size_bytes: 2524,
+                created_at: ISO,
+              },
+        );
+      }
+      return routeGet(path);
+    });
+    render(<Reports />);
+
+    await user.click(await screen.findByRole('button', { name: /^Open report / }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByText('Waiting to start')).toBeInTheDocument());
+
+    // Nothing has changed before the poll interval elapses…
+    expect(within(dialog).getByRole('button', { name: 'Check status' })).toBeInTheDocument();
+
+    // …and after it, the dialog is a finished report with a real file.
+    await vi.advanceTimersByTimeAsync(3200);
+
+    await waitFor(() => expect(within(dialog).getByText('Completed')).toBeInTheDocument());
+    expect(within(dialog).getByRole('button', { name: 'Download' })).toBeInTheDocument();
+    expect(within(dialog).getByText('2.5 KB')).toBeInTheDocument();
+  });
+
+  it('shows why a report failed instead of a bare Failed status', async () => {
+    const user = userEvent.setup();
+    mockGet.mockImplementation((path: string) =>
+      path === '/api/v1/reports/b474cfb0-dce0-49bc-b78f-f6ccc8950ac3'
+        ? Promise.resolve({
+            id: 'b474cfb0-dce0-49bc-b78f-f6ccc8950ac3',
+            template: 'demand_summary',
+            format: 'pdf',
+            status: 'failed',
+            size_bytes: null,
+            error: 'No demand recorded between 2026-08-20 and 2026-09-19',
+          })
+        : routeGet(path),
+    );
+    render(<Reports />);
+
+    await user.click(await screen.findByRole('button', { name: /^Open report / }));
+    const dialog = await screen.findByRole('dialog');
+
+    await waitFor(() => expect(within(dialog).getByText('Failed')).toBeInTheDocument());
+    expect(within(dialog).getByText(/No demand recorded between/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Download' })).toBeNull();
   });
 
   it('lets a schedule be edited and deleted, which the UI never offered', async () => {

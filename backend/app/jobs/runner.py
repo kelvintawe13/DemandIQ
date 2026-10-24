@@ -40,6 +40,11 @@ DEFAULT_FEATURE_SET_VERSION = "fs-2026.09.2"
 # A ``running`` row older than this was abandoned by a dead worker/process.
 STALE_RUN_MINUTES = 15
 
+# Reports rendered per tick. Rendering is CPU-bound (a PDF build), so the batch is
+# small and the next tick picks up the rest rather than one workspace's backlog
+# starving every other job in the tick.
+REPORT_BATCH = 5
+
 # Cadence table — kept beside the jobs so GET /pipeline/schedule and the
 # scheduler agree on one source of truth.
 JOB_SCHEDULE: dict[str, dict[str, str]] = {
@@ -49,6 +54,7 @@ JOB_SCHEDULE: dict[str, dict[str, str]] = {
     "forecast_publish": {"cadence": "04:00 daily", "cron": "0 4 * * *"},
     "full_retrain": {"cadence": "Sundays 02:00", "cron": "0 2 * * 0"},
     "report_delivery": {"cadence": "07:00 local", "cron": "0 7 * * *"},
+    "report_generation": {"cadence": "Every minute", "cron": "* * * * *"},
     "drift_check": {"cadence": "Hourly", "cron": "0 * * * *"},
 }
 
@@ -355,6 +361,42 @@ def _job_report_delivery(db: Session, workspace_id: uuid.UUID) -> JobOutcome:
     return JobOutcome(delivered, f"delivered {delivered} scheduled report(s)")
 
 
+def _job_report_generation(db: Session, workspace_id: uuid.UUID) -> JobOutcome:
+    """Render every report this workspace has queued.
+
+    ``POST /reports/generate`` only inserts the row, so this is the half that
+    produces the file. A failure marks the row ``failed`` with the reason in
+    ``reports.error`` (see ``render_stored_report``) and moves on: one template
+    that cannot render must not stop the others from being delivered.
+    """
+    from app.models.report import Report
+    from app.services.reporting.builder import render_stored_report
+
+    queued = _orm(
+        db.scalars(
+            select(Report)
+            .where(Report.workspace_id == workspace_id, Report.status == "queued")
+            .order_by(Report.created_at)
+            .limit(REPORT_BATCH)
+        ).all(),
+        Report,
+    )
+    if not queued:
+        return JobOutcome(0, "no queued reports")
+
+    rendered = 0
+    failed = 0
+    for report in queued:
+        try:
+            render_stored_report(db, report)
+            rendered += 1
+        except Exception:
+            failed += 1
+            logger.warning("report render failed id=%s", report.id, exc_info=True)
+    db.flush()
+    return JobOutcome(rendered, f"rendered {rendered} report(s), {failed} failed")
+
+
 def _job_drift_check(db: Session, workspace_id: uuid.UUID) -> JobOutcome:
     """Compute drift and raise an alert when it crosses the retrain threshold."""
     result = compute_drift(db, workspace_id)
@@ -388,6 +430,7 @@ JOBS: dict[str, Callable[[Session, uuid.UUID], JobOutcome]] = {
     "forecast_publish": _job_forecast_publish,
     "full_retrain": _job_full_retrain,
     "report_delivery": _job_report_delivery,
+    "report_generation": _job_report_generation,
     "drift_check": _job_drift_check,
 }
 

@@ -8,6 +8,16 @@ const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/
 
 type ApiError = { code: string; message: string; field?: string | null; reference?: string | null; details?: unknown };
 
+/**
+ * Absolute URL for a path the browser opens itself — a download link, a
+ * `window.open` — instead of fetching through `request()`. Signed report links
+ * come back as paths on the API; opening one as-is would ask the app's origin.
+ */
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${BASE}${path}`;
+}
+
 function getToken(): string | null {
   try {
     return localStorage.getItem("demandiq_token");

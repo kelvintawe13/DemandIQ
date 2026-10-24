@@ -21,11 +21,11 @@ import { useSession } from '../contexts/SessionContext';
 // Report periods are the workspace's calendar days, so they line up with the
 // demand the workspace recorded rather than with the browser's or UTC's clock.
 import { todayISO, isoDaysAgo } from '../lib/workspaceTime';
-import { api, ApiException } from '../api/client';
+import { api, ApiException, apiUrl } from '../api/client';
 import { plainStatus } from '../lib/plainLanguage';
 
 interface Template { id:string; name:string; description:string; cadence?:string; format?:string; title?:string; }
-interface ReportRow { id:string; name?:string; title?:string; period?:string; status?:string; created_at?:string; created?:string; size?:string; download_url?:string; format?:string; }
+interface ReportRow { id:string; name?:string; title?:string; period?:string; status?:string; created_at?:string; created?:string; size?:string; size_bytes?:number|null; content_type?:string|null; error?:string|null; download_url?:string|string|null; format?:string; }
 interface Schedule { id:string; name?:string; template?:string; recipients:string[]|string; next_run_at?:string|null; next?:string; cadence:string; enabled:boolean; format?:string; }
 
 /** The cadences the API accepts, with the label the UI shows for each. */
@@ -47,6 +47,28 @@ function formatBytes(bytes: number | null | undefined): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** The stored file's real size, falling back to its format while unrendered. */
+function sizeLabel(row: ReportRow): string {
+  if (row.size_bytes != null) return formatBytes(row.size_bytes);
+  return String(row.format ?? '—').toUpperCase();
+}
+
+/** Statuses the worker moves a report through, until it settles. */
+const IN_FLIGHT = ['queued', 'pending', 'rendering', 'running'];
+
+function isSettled(status: unknown): boolean {
+  const token = String(status ?? '').toLowerCase();
+  return token === 'completed' || token === 'ready' || token === 'failed' || token === 'error';
+}
+
+function statusTone(status: unknown): 'success' | 'critical' | 'info' | 'neutral' {
+  const token = String(status ?? '').toLowerCase();
+  if (token === 'completed' || token === 'ready') return 'success';
+  if (token === 'failed' || token === 'error') return 'critical';
+  if (IN_FLIGHT.includes(token)) return 'info';
+  return 'neutral';
 }
 
 /** A label/value row shared by the report detail view. */
@@ -85,6 +107,7 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
   const [detail, setDetail] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   // Schedule editor: cadence and recipients were write-once at creation. The API
   // has always supported PATCH and DELETE on a schedule; the UI never offered it.
   const [editing, setEditing] = useState<Schedule | null>(null);
@@ -121,6 +144,55 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
   },[]);
 
   useEffect(()=>{ void fetchAll(null); },[fetchAll]);
+
+  // ``POST /reports/generate`` only queues the row; the worker renders it on its
+  // next tick (at most a minute later). Without a poll, a page that was open
+  // when a report was queued kept saying "Waiting to start" until it was
+  // reloaded, and the file looked like it had never been produced.
+  const pendingReports = reports.some((row)=> IN_FLIGHT.includes(String(row.status ?? '').toLowerCase()));
+  const listPolls = React.useRef(0);
+  useEffect(()=>{
+    if(!pendingReports) return;
+    listPolls.current = 0;
+    // Bounded: if nothing is draining the queue (worker down), stop asking
+    // rather than refetching all three endpoints forever behind the reader.
+    const timer = window.setInterval(()=>{
+      listPolls.current += 1;
+      if(listPolls.current > 24){ window.clearInterval(timer); return; }
+      void fetchAll(null);
+    }, 5000);
+    return ()=> window.clearInterval(timer);
+  },[pendingReports, fetchAll]);
+
+  // The open report is polled more closely than the list: it is the row the
+  // reader is waiting on, and it has to turn into a Download button by itself.
+  const detailId = detail?.id ? String(detail.id) : null;
+  const detailStatus = String(detail?.status ?? '');
+  const detailSettled = !detailId || isSettled(detailStatus);
+  const detailPolls = React.useRef(0);
+  useEffect(()=>{
+    if(detailSettled || !detailId) return;
+    detailPolls.current = 0;
+    const timer = window.setInterval(()=>{
+      detailPolls.current += 1;
+      if(detailPolls.current > 40){ window.clearInterval(timer); return; }
+      void (async ()=>{
+        try{
+          setDetail(await api.get<any>(`/api/v1/reports/${detailId}`));
+          setDetailError(null);
+        }catch(e){
+          // 404 is final (deleted, or another workspace's id): retrying a dead
+          // id forever would read as "still working on it".
+          if(e instanceof ApiException && e.status === 404){
+            window.clearInterval(timer);
+            setDetail(null);
+            setDetailError(e.error.message);
+          }
+        }
+      })();
+    }, 3000);
+    return ()=> window.clearInterval(timer);
+  },[detailId, detailSettled]);
 
   const template = templates.find(item=>item.id===selectedTemplate) ?? templates[0];
 
@@ -194,14 +266,51 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
     }
   };
 
-  const downloadDetail = () => {
-    const url = detail?.download_url ?? detail?.signed_url;
-    if (url) { window.open(url, '_blank'); return; }
-    // A generated report may still be queued. Say so instead of doing nothing.
-    toast(
-      detail?.status ? `This report is ${plainStatus(detail.status).toLowerCase()}. The file appears when it completes.` : 'No file for this report yet.',
-      'info',
-    );
+  /** Open a rendered file in a new tab.
+   *  The link the API returns is a path on the API origin, which is a different
+   *  origin from the app whenever VITE_API_URL points elsewhere, so it goes
+   *  through ``apiUrl`` rather than being opened as-is. */
+  const openFile = (url: string) => window.open(apiUrl(url), '_blank', 'noopener,noreferrer');
+
+  const downloadDetail = async () => {
+    if (!detail?.id) return;
+    setDownloading(true);
+    try {
+      // Re-read right before opening: the link is signed and short-lived, so the
+      // one the dialog was rendered with can already have expired.
+      const fresh = await api.get<any>(`/api/v1/reports/${detail.id}`);
+      setDetail(fresh);
+      const url = fresh?.download_url ?? fresh?.signed_url;
+      if (!url) {
+        toast(
+          fresh?.status ? `This report is ${plainStatus(fresh.status).toLowerCase()}. The file appears when it completes.` : 'No file for this report yet.',
+          'info',
+        );
+        return;
+      }
+      openFile(url);
+    } catch (e) {
+      toast(e instanceof ApiException ? e.error.message : 'Could not fetch this report', 'error');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  /** Download straight from a list row.
+   *  The list carries no link (one would be minted per row on every page load),
+   *  so the row's own record is read first: a completed report opens its file, a
+   *  queued or failed one opens the status dialog that explains which it is. */
+  const downloadRow = async (report: { id:string } & Partial<ReportRow>) => {
+    try {
+      const fresh = await api.get<any>(`/api/v1/reports/${report.id}`);
+      setDetail(fresh);
+      setDetailError(null);
+      const url = fresh?.download_url ?? fresh?.signed_url;
+      if (url) openFile(url);
+    } catch (e) {
+      setDetail({ ...report });
+      setDetailError(e instanceof ApiException ? e.error.message : 'Could not load this report');
+    }
   };
 
   const openScheduleEditor = (schedule: Schedule) => {
@@ -267,9 +376,10 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
       </button>
     ) },
     { key:'period', label:'Period', render:(r:any)=> <span className="text-caption text-slate-500">{(r as any).period ?? ''}</span> },
-    { key:'when', label:'Generated', sortable:true, render:(r:any)=> <span className="text-micro text-slate-500">{r.created_at ? new Date(r.created_at).toLocaleDateString() : (r as any).created ?? ''} · {(r as any).size ?? r.format ?? '—'}</span> },
+    { key:'status', label:'Status', render:(r:any)=> <StatusPill tone={statusTone(r.status)} dot>{plainStatus(r.status)}</StatusPill> },
+    { key:'when', label:'Generated', sortable:true, render:(r:any)=> <span className="text-micro text-slate-500">{r.created_at ? new Date(r.created_at).toLocaleDateString() : (r as any).created ?? ''} · {sizeLabel(r)}</span> },
     { key:'actions', label:'', cellClassName:'pr-0', render:(r:any)=> (
-      <button type="button" onClick={()=>void openReport(r)} aria-label={`Download ${(r.name ?? r.title) || String(r.id).slice(0,8)}`} className="tap-expand inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-micro font-semibold text-slate-600 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><DownloadIcon className="h-3.5 w-3.5" strokeWidth={2} />Download</button>
+      <button type="button" onClick={()=>void downloadRow(r)} aria-label={`Download ${(r.name ?? r.title) || String(r.id).slice(0,8)}`} className="tap-expand inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-micro font-semibold text-slate-600 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><DownloadIcon className="h-3.5 w-3.5" strokeWidth={2} />Download</button>
     ) },
   ];
 
@@ -277,6 +387,7 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
   if(error) return <EmptyState variant={error.variant} title={error.title} description={error.desc} hints={error.hints} action={{label:'Retry',onClick:()=>void fetchAll(null)}} size="md" />;
 
   const hasTemplates = templates.length>0;
+  const hasFile = Boolean(detail?.download_url ?? detail?.signed_url);
   const hasReports = reports.length>0;
   const hasSchedules = schedules.length>0;
 
@@ -377,9 +488,12 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
                         <FileTextIcon className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.8} />
                         <span className="min-w-0 flex-1 truncate text-meta font-medium text-slate-900" title={String(report.name ?? report.title ?? report.id)}>{(report.name ?? report.title) || `${String(report.id).slice(0, 8)}…`}</span>
                         <span className="text-caption text-slate-500">{(report as any).period ?? ''}</span>
-                        <span className="hidden text-micro text-slate-500 sm:inline">{report.created_at ? new Date(report.created_at).toLocaleDateString() : (report as any).created ?? ''} · {(report as any).size ?? report.format ?? '—'}</span>
+                        <span className="hidden items-center gap-2 text-micro text-slate-500 sm:inline-flex">
+                          {report.created_at ? new Date(report.created_at).toLocaleDateString() : (report as any).created ?? ''} · {sizeLabel(report)}
+                          <StatusPill tone={statusTone(report.status)} dot>{plainStatus(report.status)}</StatusPill>
+                        </span>
                       </button>
-                      <button type="button" onClick={()=>void openReport(report)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-2.5 text-micro font-semibold text-slate-600 sm:py-1.5 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                      <button type="button" onClick={()=>void downloadRow(report)} aria-label={`Download ${(report.name ?? report.title) || String(report.id).slice(0,8)}`} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-2.5 text-micro font-semibold text-slate-600 sm:py-1.5 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
                         <DownloadIcon className="h-3.5 w-3.5" strokeWidth={2} />Download
                       </button>
                     </li>
@@ -432,9 +546,17 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
         description="Status, window and file for this generated report."
         footer={<>
           <ModalButton tone="ghost" onClick={()=>setDetail(null)}>Close</ModalButton>
-          <ModalButton onClick={downloadDetail} disabled={detailLoading || Boolean(detailError)}>
-            {detail?.download_url ?? detail?.signed_url ? 'Download' : 'Check status'}
-          </ModalButton>
+          {hasFile ? (
+            <ModalButton onClick={()=>void downloadDetail()} disabled={detailLoading || downloading}>
+              {downloading ? 'Preparing…' : 'Download'}
+            </ModalButton>
+          ) : (
+            // Not rendered yet: ask again now rather than making the reader
+            // close and reopen the dialog to see whether it moved.
+            <ModalButton onClick={()=> detail?.id && void openReport({ id: String(detail.id) })} disabled={detailLoading}>
+              Check status
+            </ModalButton>
+          )}
         </>}>
         {detailLoading ?
         <LoadingState label="Loading report" size="sm" /> :
@@ -459,10 +581,17 @@ export function Reports(_props: {onNavigate?:(id:string)=>void}) {
             </DetailRow>
             <DetailRow label="Size">{detail.size_bytes != null ? formatBytes(detail.size_bytes) : detail.size ?? '—'}</DetailRow>
             <DetailRow label="Generated">{detail.created_at ? new Date(detail.created_at).toLocaleString() : '—'}</DetailRow>
+            {detail.error && (
+              // Why it failed lives on the row. A report stuck at "Failed" with no
+              // reason is the same dead end as one stuck at "Waiting to start".
+              <DetailRow label="Why it failed"><span className="text-red-700">{detail.error}</span></DetailRow>
+            )}
             <p className="mt-1 text-fine leading-relaxed text-slate-500">
-              {(detail.download_url ?? detail.signed_url) ?
+              {detail.status === 'failed' || detail.status === 'error' ?
+              'This report was not produced. Running it again from the library retries it with the current data.' :
+              hasFile ?
               'The download link is signed and short-lived. It was built from your latest demand data, and the model used is recorded on the report.' :
-              'No file yet. The report is still being produced. The download appears here once it completes.'}
+              'No file yet. The report is still being produced. This view updates itself as soon as the file is ready.'}
             </p>
         </dl>}
       </Modal>

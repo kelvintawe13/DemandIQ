@@ -273,8 +273,11 @@ def create_app(*, frontend_dist: Path | None = None) -> FastAPI:
     # Quality & alerts
     app.include_router(quality.router)
     app.include_router(alerts.router)
-    # Reports (must be before generic governance pipeline routes)
+    # Reports (must be before generic governance pipeline routes). The download
+    # route is separate because it is authorised by a signed link rather than the
+    # router's bearer-token dependency.
     app.include_router(reports.router)
+    app.include_router(reports.download_router)
     # Webhooks (admin)
     app.include_router(webhooks.router)
     # Sources (aggregated connectors) & connectors & api-keys

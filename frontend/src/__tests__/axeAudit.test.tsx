@@ -82,6 +82,7 @@ vi.mock('../api/client', () => ({
   },
   getAuthHeader: () => ({}),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  apiUrl: (path: string) => path,
 }));
 
 import { api } from '../api/client';

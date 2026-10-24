@@ -1,15 +1,18 @@
-"""Report builder — async generation stubbed to object store (S3).
+"""Report builder — queueing, listing and signed download links.
 
 Per ARCHITECTURE.md §6 and API_ENDPOINTS.md reporting:
 
-* Generation is asynchronous into the object store; the API returns a
-  ``report_id`` and the UI polls ``GET /reports/{id}`` for a signed URL.
-* This module stubs the object store: files are not uploaded to real S3,
-  but a deterministic ``file_uri`` is persisted and a time-limited signed
-  URL is synthesized on read.
-* Generation is simulated synchronously for testability (status becomes
-  ``completed`` immediately). In production the queued row would be picked
-  up by a worker; the polling contract is preserved regardless.
+* ``POST /reports/generate`` **queues** a report and returns its id. The row is
+  ``queued`` when the response is sent; ``rendering`` and ``completed`` are set
+  by the ``report_generation`` worker job, which does the actual work through
+  :mod:`app.services.reporting.render`. Reports used to be marked ``completed``
+  inside this module with a file URI that pointed at nothing.
+* The rendered bytes live on the row (``reports.content``, see migration 022)
+  and are served by ``GET /reports/{id}/download``.
+* ``build_signed_url`` mints an expiring HMAC link to that endpoint. The link is
+  what the UI opens with ``window.open``, so it has to work without an
+  ``Authorization`` header — the signature is the authorisation, and it is bound
+  to one report and one expiry.
 """
 
 from __future__ import annotations
@@ -65,58 +68,58 @@ REPORT_TEMPLATES: list[dict[str, str]] = [
 TEMPLATE_IDS = {t["id"] for t in REPORT_TEMPLATES}
 ALLOWED_FORMATS = {"pdf", "csv", "xlsx"}
 
-# In-memory queue stub (production uses Redis/RQ)
-_queued: dict[str, uuid.UUID] = {}
+#: How long a minted download link stays valid.
+DOWNLOAD_URL_TTL_SECONDS = 3600
+
+#: Domain separator, so a link signature can never be replayed as a JWT (or any
+#: other HMAC this service makes with the same secret).
+_SIGNING_CONTEXT = b"report-download.v1"
 
 
-def _object_key(report_id: uuid.UUID, fmt: str) -> str:
-    return f"reports/{report_id}.{fmt.lower()}"
+def object_key(report: Report) -> str:
+    """Where the row says its bytes live — the identity of the stored file."""
+    return f"reports/{report.id}.{report.format}"
 
 
-def _stub_file_uri(report_id: uuid.UUID, fmt: str) -> str:
-    cfg = get_settings()
-    base = cfg.object_store_url or "s3://demandiq-reports"
-    return f"{base.rstrip('/')}/{_object_key(report_id, fmt)}"
+def file_uri(report: Report) -> str:
+    """A URI that names the storage, so it cannot be mistaken for an S3 key."""
+    return f"db://{object_key(report)}"
 
 
-def build_signed_url(report: Report, expires_seconds: int = 3600) -> str | None:
-    """Synthesize a signed URL for a completed report.
+def _signing_key() -> bytes:
+    secret = get_settings().jwt_secret.encode()
+    return hmac.new(secret, _SIGNING_CONTEXT, hashlib.sha256).digest()
 
-    In production this would be a presigned S3 URL. Here we create an
-    HMAC-signed URL so that polling tests can verify a ``signed_url``
-    without needing real S3 credentials.
 
-    Args:
-        report: Completed ``Report`` row with a ``file_uri``.
-        expires_seconds: URL lifetime.
+def _signature(report_id: uuid.UUID, expires: int) -> str:
+    message = f"{report_id}:{expires}".encode()
+    return hmac.new(_signing_key(), message, hashlib.sha256).hexdigest()[:32]
 
-    Returns:
-        Signed URL string, or ``None`` when the report is not yet ready.
+
+def build_signed_url(report: Report, expires_seconds: int = DOWNLOAD_URL_TTL_SECONDS) -> str | None:
+    """Mint an expiring download link for a completed report.
+
+    Returns ``None`` while the report is not ready: a link that 409s is worse
+    than no link, because the UI offers it as a Download button.
     """
-    if report.status != "completed" or report.file_uri is None:
+    if report.status != "completed" or report.content is None:
         return None
-    cfg = get_settings()
-    secret = (cfg.object_store_secret or cfg.jwt_secret).encode()
     expires = int(datetime.datetime.now(datetime.UTC).timestamp()) + expires_seconds
-    payload = f"{report.id}:{report.file_uri}:{expires}".encode()
-    sig = hmac.new(secret, payload, hashlib.sha256).hexdigest()[:16]
-    # Use file_uri as path; synthesize an https URL for the UI.
-    # ``object_store_url`` may be s3://..., convert to https stub.
-    base = "https://object-store.demandiq.local"
-    if cfg.object_store_url and cfg.object_store_url.startswith("https://"):
-        base = cfg.object_store_url.rstrip("/")
-    return f"{base}/{_object_key(report.id, report.format)}?expires={expires}&sig={sig}"
+    sig = _signature(report.id, expires)
+    return f"/api/v1/reports/{report.id}/download?expires={expires}&sig={sig}"
 
 
-def _encode_cursor(created_at: datetime.datetime, rid: uuid.UUID) -> str:
-    raw = json.dumps({"ts": created_at.isoformat(), "id": str(rid)})
-    return base64.urlsafe_b64encode(raw.encode()).decode()
+def verify_download_signature(report_id: uuid.UUID, expires: int, sig: str) -> bool:
+    """Whether ``sig`` authorises a download of ``report_id`` until ``expires``.
 
-
-def _decode_cursor(cursor: str) -> tuple[datetime.datetime, uuid.UUID]:
-    raw = base64.urlsafe_b64decode(cursor.encode()).decode()
-    data = json.loads(raw)
-    return datetime.datetime.fromisoformat(data["ts"]), uuid.UUID(data["id"])
+    The comparison is constant-time, and an expired link is refused even when the
+    signature is otherwise correct — the expiry is part of the signed message, so
+    a valid signature over a past expiry is still an expired link.
+    """
+    if expires < int(datetime.datetime.now(datetime.UTC).timestamp()):
+        return False
+    expected = _signature(report_id, expires)
+    return hmac.compare_digest(expected, (sig or "").strip().lower())
 
 
 def generate_report(
@@ -130,23 +133,23 @@ def generate_report(
     location_ids: list[uuid.UUID] | None = None,
     generated_by: uuid.UUID | None = None,
 ) -> Report:
-    """Create a report row, stub async generation and mark completed.
+    """Queue a report row for the worker to render.
 
     Args:
         db: Database session.
         workspace_id: Workspace scoping.
         template_id: One of ``TEMPLATE_IDS``.
-        period_start: Report period start (optional).
-        period_end: Report period end (optional).
+        period_start: Report period start (optional — the renderer defaults it).
+        period_end: Report period end (optional — the renderer defaults it).
         fmt: One of ``pdf`` / ``csv`` / ``xlsx``.
-        location_ids: Optional location filter (stored in audit, not schema).
+        location_ids: Optional location filter, honouring the API body.
         generated_by: Actor user id.
 
     Returns:
-        Persisted ``Report`` with ``status='completed'`` and ``file_uri`` set.
+        The persisted ``Report``, with ``status='queued'`` and no content yet.
 
     Raises:
-        ValueError: On unknown template or format.
+        ValueError: On unknown template or format, before a row is written.
     """
     if template_id not in TEMPLATE_IDS:
         raise ValueError(f"Unknown template '{template_id}'")
@@ -164,33 +167,23 @@ def generate_report(
         status="queued",
         file_uri=None,
         size_bytes=None,
+        content_type=None,
+        # Carried on the row because the worker is a separate pass: dropping it
+        # would render a workspace-wide report for a request that asked for one
+        # location, which looks like a successful answer to a different question.
+        location_ids=[str(loc) for loc in location_ids] if location_ids else None,
         generated_by=generated_by,
         created_at=datetime.datetime.now(datetime.UTC),
     )
     db.add(report)
     db.flush()
-
-    # --- Simulate async worker (synchronous completion) --------------------
-    # In production a worker would render the file and upload to S3.
-    # Here we complete immediately so that polling tests see a ready report.
-    report.file_uri = _stub_file_uri(report.id, fmt_norm)
-    # Rough size per format
-    size_map = {"pdf": 1_200_000, "csv": 220_000, "xlsx": 740_000}
-    report.size_bytes = size_map.get(fmt_norm, 500_000)
-    report.status = "completed"
-    db.flush()
-
-    # Track queued alias for introspection (not used in tests)
-    _queued[str(report.id)] = report.id
     logger.info(
-        "report generated id=%s workspace=%s template=%s format=%s by=%s",
+        "report queued id=%s template=%s format=%s locations=%s",
         report.id,
-        workspace_id,
         template_id,
         fmt_norm,
-        generated_by,
+        len(location_ids) if location_ids else 0,
     )
-    _ = location_ids  # reserved for future filtering
     return report
 
 
@@ -200,6 +193,17 @@ def get_report(db: Session, report_id: uuid.UUID, workspace_id: uuid.UUID) -> Re
     if row is None or row.workspace_id != workspace_id:
         return None
     return row
+
+
+def _encode_cursor(created_at: datetime.datetime, rid: uuid.UUID) -> str:
+    raw = json.dumps({"ts": created_at.isoformat(), "id": str(rid)})
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime.datetime, uuid.UUID]:
+    raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+    data = json.loads(raw)
+    return datetime.datetime.fromisoformat(data["ts"]), uuid.UUID(data["id"])
 
 
 def list_reports(
@@ -228,3 +232,55 @@ def list_reports(
     page = rows[:limit]
     next_cursor = _encode_cursor(page[-1].created_at, page[-1].id) if has_more and page else None
     return page, next_cursor, has_more
+
+
+def render_stored_report(db: Session, report: Report) -> Report:
+    """Render one queued report into its row.
+
+    Split out of the job so the same call can be made from a one-off script or a
+    test. Idempotent in the sense that matters: a report that already has content
+    is left alone, so a retried tick cannot replace a good file with a worse one.
+    """
+    from app.services.reporting import render as renderer
+
+    if report.status == "completed" and report.content is not None:
+        return report
+
+    report.status = "rendering"
+    report.error = None
+    db.flush()
+
+    try:
+        # Inside the try: a malformed stored id has to mark the row ``failed``
+        # like any other render error, not escape and leave it ``rendering``.
+        requested = [uuid.UUID(str(loc)) for loc in (report.location_ids or [])]
+        document = renderer.collect_document(
+            db,
+            workspace_id=report.workspace_id,
+            template=report.template,
+            period_start=report.period_start,
+            period_end=report.period_end,
+            location_ids=requested or None,
+        )
+        content, content_type = renderer.render(document, report.format)
+    except Exception as exc:
+        # The row records why, in the same transaction the job is using, so the
+        # failure is visible on GET /reports/{id} instead of only in a log.
+        report.status = "failed"
+        report.error = f"{exc.__class__.__name__}: {exc}"[:500]
+        db.flush()
+        raise
+
+    report.content = content
+    report.content_type = content_type
+    report.size_bytes = len(content)
+    report.file_uri = file_uri(report)
+    report.status = "completed"
+    db.flush()
+    logger.info(
+        "report rendered id=%s format=%s bytes=%s",
+        report.id,
+        report.format,
+        len(content),
+    )
+    return report

@@ -101,8 +101,9 @@ Base URL: `/api/v1` — **177 paths → 213 items** (`openapi.json` via `backend
 | `GET`                   | `/analytics/breakdown`      | Per-location table rows with sparkline series.                                  |
 | `GET`                   | `/analytics/insights`       | Generated observations (peaks, drops, coverage misses).                         |
 | `GET`                   | `/reports/templates`        | Available report templates.                                                     |
-| `POST`                  | `/reports/generate`         | Body: `template_id`, `period`, `format`, `location_ids[]`. Returns `report_id`. |
-| `GET`                   | `/reports/{id}`             | Status and, when ready, a signed download URL.                                  |
+| `POST`                  | `/reports/generate`         | Body: `template_id`, `period`, `format`, `location_ids[]`. **Queues** the report and returns `report_id` with `status: "queued"` — the file is rendered by the `report_generation` job on its next tick. |
+| `GET`                   | `/reports/{id}`             | Status (`queued` \| `rendering` \| `completed` \| `failed`), `error` when rendering failed, `location_ids` echoed, and a signed `download_url` once the file exists (`null` before that). |
+| `GET`                   | `/reports/{id}/download`    | The rendered file. Authorised by the link's `expires`/`sig` rather than a bearer token, because the browser opens it directly; **403 `invalid_signature`** for a forged or expired link, **409 `not_ready`** until the worker has rendered the report. |
 | `GET`                   | `/reports`                  | Recently generated reports.                                                     |
 | `GET`                   | `/reports/schedules`        | Scheduled deliveries.                                                           |
 | `POST` `PATCH` `DELETE` | `/reports/schedules[/{id}]` | Manage schedules (cadence, recipients, format, enabled).                        |
@@ -193,20 +194,36 @@ pull), maps the returned rows through the connector's field mapping, and commits
 counted as skipped, never guessed at; a connector with no endpoint is reported as such and
 does not get a `last_sync_at` stamp.
 
+`report_generation` renders queued reports (up to 5 per tick, every minute): it reads the
+workspace's own rows, writes the file in the requested format, and stores it on the report
+row. A render that throws marks the row `failed` with the reason in `reports.error` and the
+job carries on with the next report, so one bad template cannot block the others.
+`report_delivery` (07:00) is what turns a due schedule into a queued report.
+
 ## Webhooks — **admin**
 
 | Method           | Path                        | Description                                    |
 | ---------------- | --------------------------- | ---------------------------------------------- |
 | `GET` `POST`     | `/webhooks`                 | Endpoints and their subscribed events.         |
 | `PATCH` `DELETE` | `/webhooks/{id}`            | Update URL, events or status.                  |
-| `POST`           | `/webhooks/{id}/test`       | Sends a signed sample payload.                 |
+| `POST`           | `/webhooks/{id}/test`       | Records a signed sample delivery.              |
 | `GET`            | `/webhooks/{id}/deliveries` | Delivery log with response codes and attempts. |
 | `GET`            | `/webhooks/events`          | Catalog of emittable events.                   |
 
-**Outbound events:** `forecast.generated`, `forecast.updated`, `policy.changed`,
-`alert.raised`, `alert.resolved`, `ingest.completed`, `ingest.failed`,
-`model.promoted`. Payloads are signed with `X-DemandIQ-Signature`
-(HMAC-SHA256 over the raw body), retried 5 times with exponential backoff.
+**Outbound events:** the catalog (`services/delivery/webhooks.py:31`) is
+`forecast.generated`, `forecast.updated`, `policy.changed`, `alert.raised`,
+`alert.resolved`, `ingest.completed`, `ingest.failed`, `model.promoted`. Only
+`alert.raised` and `alert.resolved` are fired by running code — a failed
+pipeline job raises one, and the next success resolves it. The other six are
+declared so an endpoint can subscribe, and nothing emits them yet.
+
+**Delivery is dry-run.** `fanout_event` writes one `webhook_deliveries` row per
+subscribed endpoint instead of POSTing, so the signature
+(`X-DemandIQ-Signature`, HMAC-SHA256 over the raw body) and the attempt history
+are produced but no request leaves the process. `deliver_webhook` already does
+the real signed POST and the 5-attempt loop for a `dry_run=False` caller; the
+backoff between attempts is computed and logged, not awaited. Delivering for
+real is a queue-backed change, not a setting.
 
 ## Agent & Billing
 

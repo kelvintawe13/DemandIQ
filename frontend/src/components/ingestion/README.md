@@ -4,7 +4,21 @@
 **Implemented prototype** — React/TypeScript source is present and runnable via `vite`.
 
 ## Purpose & Proposal Alignment
-Ingestion tabs implementing Ch 3.6 Data Ingestion & Normalisation and `backend/ARCHITECTURE.md` §1 (six channels → canonical `demand_observations(location_id,date,demand_qty)`). Enforces commit rules: `UNIQUE(location_id,date)`, no future dates, staged `ingest_uploads` preview before commit.
+Ingestion tabs implementing Ch 3.6 Data Ingestion & Normalisation. The design envelope in `backend/ARCHITECTURE.md` §1 names six inbound channels; **five have a working adapter today**, and each writes the same canonical `demand_observations(location_id, date, demand_qty)` row:
+
+| Channel | Entry point | `source` tag |
+| --- | --- | --- |
+| Manual entry | `POST /ingest/manual` | `manual` |
+| Spreadsheet | `POST /ingest/file` → mapping → commit (CSV/XLSX) | `file` |
+| Photo | `POST /ingest/image` → OCR → review → commit | `image` |
+| Enrolled till | `POST /devices/{id}/demand` with `X-Device-Key` | `device` |
+| Connector | `POST /connectors/{id}/pull`, and the queued sync job | the connector's `type` (`pos`, `momo`, `file`, `ocr`, `api`) |
+
+Mobile money is a connector `type` on that same pull path, not a separate route — **no inbound webhook writes demand** (the `/webhooks` API manages outbound delivery only), so the proposal's MoMo webhook is design only, as is `sms`, a reserved connector type with no gateway parser. Neither is implemented anywhere in this folder.
+
+The channel is **not a column**: `demand_observations` has no `source` field. It is written as a `[source:<tag>]` note plus `upload_id` or `source_id`, and `GET /ingest/demand` reads the tag back as `source`, so a row can be attributed without a JOIN.
+
+Commit rules are enforced in one place, `app/services/ingestion/normaliser.py::commit_demand`: `UNIQUE(location_id,date)`, no future dates, staged `ingest_uploads` preview before commit.
 
 Chapters: **3.4-3.11** features & ingestion, **3.12-3.15** models & metrics (MAE/RMSE/RMSLE), **3.16** uncertainty (adaptive conformal 90%), **3.17-3.20** policy simulation SR/PS/UD, **3.21** URBAN-WASTE evidence boundary (Fig 4), **3.22** architecture Fig 5 (React → FastAPI → Forecasting/Policy/Explainability → PostgreSQL).
 
@@ -126,9 +140,10 @@ failed read is reported as a failure, not as "nothing was written".
 
 The upload is checked by content, not by its filename or the browser's MIME
 type: `POST /ingest/image` returns **400 `invalid_image`** for a non-image or an
-image above the pixel budget. The local engine applies EXIF orientation,
-contrast normalisation and a conservative upscale, then tries Tesseract's
-uniform-block, column and sparse page-segmentation modes. `GET
+image above the pixel budget. The local engine applies EXIF orientation, a
+conservative upscale, illumination flattening and a deskew — in that order, for
+the reasons in *Photos of a page* — then tries Tesseract's uniform-block, column
+and sparse page-segmentation modes. `GET
 /ingest/image/{job_id}` reports the chosen mode and the measured mean word
 confidence under `quality`, separately from each row's line-legibility score.
 

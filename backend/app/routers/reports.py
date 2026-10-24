@@ -3,6 +3,7 @@
 * GET  /api/v1/reports/templates
 * POST /api/v1/reports/generate
 * GET  /api/v1/reports/{id}
+* GET  /api/v1/reports/{id}/download
 * GET  /api/v1/reports
 * GET  /api/v1/reports/schedules
 * POST /api/v1/reports/schedules
@@ -17,11 +18,12 @@ import logging
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.report import Report
 from app.models.user import User
 from app.security.api_key_auth import get_principal, require_write_scope
 from app.security.permissions import REPORTS_GENERATE, REPORTS_READ, has_capability
@@ -31,6 +33,7 @@ from app.services.reporting.builder import (
     generate_report,
     get_report,
     list_reports,
+    verify_download_signature,
 )
 from app.services.reporting.scheduler import (
     create_schedule,
@@ -61,6 +64,12 @@ router = APIRouter(
     tags=["reports"],
     dependencies=[Depends(require_reports_read)],
 )
+
+# The download route is authorised by its signed link, not by a bearer token, so
+# it cannot live on ``router``: the router-level ``require_reports_read`` would
+# answer 401 to every link the browser opens with ``window.open`` (no
+# Authorization header). It shares the prefix and nothing else.
+download_router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 
 def _error(code: int, err: str, msg: str, field: str | None = None) -> HTTPException:
@@ -141,7 +150,7 @@ def generate(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_principal)],
 ) -> dict[str, Any]:
-    """Queue a report generation (async stub). Returns ``report_id``."""
+    """Queue a report for rendering. Returns ``report_id`` and ``status='queued'``."""
     require_write_scope(current_user)
     # Normalise period
     p_start = payload.period_start
@@ -275,11 +284,52 @@ def get_one(
         "format": row.format,
         "status": row.status,
         "file_uri": row.file_uri,
+        "content_type": row.content_type,
         "signed_url": signed,
         "download_url": signed,
         "size_bytes": row.size_bytes,
+        "error": row.error,
+        "location_ids": row.location_ids or [],
         "created_at": row.created_at.isoformat(),
     }
+
+
+@download_router.get("/{report_id}/download")
+def download(
+    report_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+    expires: int = Query(..., description="Unix expiry the link was minted for"),
+    sig: str = Query(..., description="HMAC over report id and expiry"),
+) -> Response:
+    """Serve a rendered report's bytes.
+
+    Authorised by the signature rather than a bearer token because the link is
+    opened by the browser (``window.open``) and carries no ``Authorization``
+    header — the signature is what makes that safe, and it is bound to one
+    report and one expiry. ``GET /reports/{id}`` mints a fresh link while the
+    report is ``completed``.
+    """
+    if not verify_download_signature(report_id, expires, sig):
+        raise _error(403, "invalid_signature", "This download link is invalid or has expired")
+
+    row = db.get(Report, report_id)
+    if row is None:
+        raise _error(404, "not_found", "Report not found")
+    if row.status != "completed" or row.content is None:
+        # 409 rather than 404: the report exists and the link is valid, the file
+        # just is not there yet. A 404 would tell the UI to give up.
+        raise _error(
+            409,
+            "not_ready",
+            f"Report is {row.status}; the file appears when it completes",
+        )
+
+    filename = f"{row.template}-{row.period_end or row.created_at.date()}.{row.format}"
+    return Response(
+        content=row.content,
+        media_type=row.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(

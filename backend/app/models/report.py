@@ -5,11 +5,11 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Text
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, LargeBinary, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, MutableJSONList
 
 
 class Report(Base):
@@ -29,6 +29,22 @@ class Report(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
     file_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # The rendered file itself. Stored on the row for the same reasons the
+    # upload photo is (migration 021): the workspace owns and deletes it with
+    # the row, and no bucket is configured. Deferred so listing reports never
+    # drags whole documents into the session.
+    content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    # Sniffed from the bytes the renderer produced, never from the request's
+    # ``format`` — the two cannot disagree if only one of them is stored.
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why rendering failed, in the row rather than only in the job log: a report
+    # stuck at ``failed`` with no reason is the same dead end as a report stuck
+    # at ``queued`` forever.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The location filter the caller asked for, kept so the worker can honour it
+    # and so the report can be explained afterwards. Stored as strings because
+    # it is a JSON list, and as a mutable list so an in-place edit is not lost.
+    location_ids: Mapped[list[str] | None] = mapped_column(MutableJSONList, nullable=True)
     generated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
