@@ -134,6 +134,148 @@ def test_parse_ocr_text_skips_lines_without_both_fields() -> None:
     assert rows == []
 
 
+def test_parse_ocr_text_ignores_a_labelled_note_beside_the_count() -> None:
+    """A table number is not a visitor count.
+
+    "14 Oct 2026   40   Table 6" always meant forty covers, but the parser took
+    the last integer on the line and committed six. A wrong count in demand
+    history is worse than a missing one: nothing downstream can tell it apart
+    from a real day.
+    """
+    from app.services.ingestion.image import CONFIDENCE_UNAMBIGUOUS_LINE
+
+    row = parse_ocr_text("14 Oct 2026   40   Table 6")[0]
+    assert row["demand_qty"] == 40
+    # Only one number on the line is a count, so the read is not ambiguous.
+    assert row["confidence"] == CONFIDENCE_UNAMBIGUOUS_LINE
+
+    assert parse_ocr_text("12/01/2026   112   tips 3")[0]["demand_qty"] == 112
+
+
+def test_parse_ocr_text_keeps_a_label_that_names_the_count() -> None:
+    # "Visitors 40" *is* the count: only labels that number something else
+    # ("Table 6") are skipped, not the word the log uses for the figure.
+    assert parse_ocr_text("12/01/2026   Visitors 40")[0]["demand_qty"] == 40
+
+
+def test_parse_ocr_text_keeps_a_zero_count() -> None:
+    """A restaurant that served nobody has not stopped reporting.
+
+    Zero was dropped as if it were unreadable, so a closed day quietly became a
+    missing day and the forecast trained on a gap. The platform stores zero —
+    ``normaliser.validate_demand_qty`` only refuses a negative — so the parser
+    was the one place that lost it.
+    """
+    rows = parse_ocr_text("12/01/2026   0")
+    assert rows[0]["demand_qty"] == 0
+
+
+def test_parse_ocr_text_reads_a_count_wider_than_six_digits() -> None:
+    # The platform ceiling is seven digits; a pattern that stopped at six
+    # dropped such a row instead of reporting a count it could not hold.
+    assert parse_ocr_text("12/01/2026 1234567")[0]["demand_qty"] == 1234567
+
+
+def test_ocr_warnings_name_a_date_that_was_read_twice() -> None:
+    """Two rows for one day cannot both be stored, so the screen must say so.
+
+    The commit upserts on ``(location_id, date)``, so the second row silently
+    replaces the first. That is the right rule, but it must not be invisible in a
+    list the operator was asked to check before importing.
+    """
+    from app.services.ingestion.image import _row_warnings
+
+    warnings = _row_warnings(parse_ocr_text("12/01/2026 112\n12/01/2026 98\n13/01/2026 87"))
+    assert [w["code"] for w in warnings] == ["conflicting_date"]
+    assert warnings[0]["row_indexes"] == [0, 1]
+    assert warnings[0]["demand_qtys"] == [112, 98]
+    assert "2026-01-12" in warnings[0]["message"]
+
+    duplicates = _row_warnings(parse_ocr_text("12/01/2026 112\n12/01/2026 112"))
+    assert [w["code"] for w in duplicates] == ["duplicate_date"]
+    assert _row_warnings(parse_ocr_text("12/01/2026 112")) == []
+
+
+def test_a_mode_with_more_rows_does_not_beat_a_cleaner_one() -> None:
+    """Scoring is coverage and consistency, not volume.
+
+    A page-segmentation mode that splits lines in two can report more rows than
+    the mode that read the page correctly; committing its duplicate dates would
+    be worse than the missing day it hides.
+    """
+    from app.services.ingestion.image import _extraction_score
+
+    clean = parse_ocr_text("\n".join(f"{day:02d}/01/2026 {100 + day}" for day in range(1, 21)))
+    twice = "\n".join(f"{day:02d}/01/2026 {100 + day}" for day in range(1, 12)) + "\n"
+    split = parse_ocr_text(twice * 2)
+
+    assert len(split) > len(clean)
+    assert _extraction_score(clean, 0.8) > _extraction_score(split, 0.9)
+    # Word confidence only breaks a tie between otherwise equal reads.
+    assert _extraction_score(clean, 0.9) > _extraction_score(clean, 0.8)
+
+
+def test_ocr_plausibility_ceiling_matches_the_platform_ceiling() -> None:
+    """The OCR module mirrors MAX_DEMAND_QTY to stay free of database imports.
+
+    Two copies of one ceiling drift; this is the check that keeps them equal.
+    """
+    from app.services.ingestion.image import MAX_PLAUSIBLE_DEMAND
+    from app.services.ingestion.normaliser import MAX_DEMAND_QTY
+
+    assert MAX_PLAUSIBLE_DEMAND == MAX_DEMAND_QTY
+
+
+def test_remote_ocr_accepts_a_bare_json_array(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A service may answer with a list, not ``{"rows": [...]}``.
+
+    The old one-liner called ``.get`` before checking the type, so an array body
+    raised AttributeError, its rows were discarded, and the upload silently fell
+    back to Tesseract — a correct remote read thrown away.
+    """
+    from app.services.ingestion import image as image_module
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return [{"date": "2026-01-12", "demand_qty": 112}]
+
+    monkeypatch.setattr(image_module.httpx, "post", lambda *a, **k: _Response())
+    rows = image_module._extract_via_remote(b"x", "log.jpg", "http://ocr.test")
+    assert [row["demand_qty"] for row in rows] == [112]
+
+
+def test_remote_ocr_keeps_a_zero_and_refuses_a_negative(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.ingestion import image as image_module
+
+    class _Response:
+        def __init__(self, rows: list[dict[str, object]]) -> None:
+            self._rows = rows
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"rows": self._rows}
+
+    monkeypatch.setattr(
+        image_module.httpx,
+        "post",
+        lambda *a, **k: _Response([{"date": "2026-01-12", "demand_qty": 0}]),
+    )
+    zero = image_module._extract_via_remote(b"x", "log.jpg", "http://ocr.test")
+    assert [row["demand_qty"] for row in zero] == [0]
+
+    monkeypatch.setattr(
+        image_module.httpx,
+        "post",
+        lambda *a, **k: _Response([{"date": "2026-01-12", "demand_qty": -4}]),
+    )
+    assert image_module._extract_via_remote(b"x", "log.jpg", "http://ocr.test") == []
+
+
 def test_ocr_preview_never_fabricates_rows_for_garbage_input() -> None:
     # A non-image blob cannot be OCR'd; the adapter must return an empty
     # preview with an honest note rather than an invented demand row.
@@ -198,10 +340,10 @@ def test_parser_confidence_is_about_line_legibility_not_probability() -> None:
     unambiguous = parse_ocr_text("12/01/2026   112")[0]
     assert unambiguous["confidence"] == CONFIDENCE_UNAMBIGUOUS_LINE
 
-    # A trailing note leaves a second integer behind, so the last one was taken
-    # for the operator — worth flagging before it is committed.
-    ambiguous = parse_ocr_text("12/01/2026   112   tips 3")[0]
-    assert ambiguous["demand_qty"] == 3
+    # Two bare numbers leave the count a choice: the nearest to the date was
+    # taken for the operator — worth flagging before it is committed.
+    ambiguous = parse_ocr_text("12/01/2026   112   6")[0]
+    assert ambiguous["demand_qty"] == 112
     assert ambiguous["confidence"] == CONFIDENCE_AMBIGUOUS_LINE
     assert ambiguous["confidence"] < CONFIDENCE_UNAMBIGUOUS_LINE
 

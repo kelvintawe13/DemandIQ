@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime
 import io
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -67,18 +68,53 @@ _TEXT_DATE_MONTH_FIRST = re.compile(
     r"(?:[\s,./-]+(20\d{2}))?",
     re.IGNORECASE,
 )
-_INT = re.compile(r"(?<!\d)(\d{1,6})(?!\d)")
+# Seven digits, so a count up to the platform ceiling (``normaliser.MAX_DEMAND_QTY``)
+# is readable rather than silently dropped for being wider than the pattern.
+_INT = re.compile(r"(?<!\d)(\d{1,7})(?!\d)")
 
 # Tesseract frequently reads a printed/handwritten 7 as '/' when it ends a
 # count token ("2/" for 27). Only the unambiguous single-digit-before-slash
-# form is corrected; a date's "2/05" is left alone because a digit follows,
-# and the date itself has already been removed from the line at this point.
+# form is corrected; a date's "2/05" is left alone because a digit follows, and
+# integers inside the date are not count candidates in the first place.
 _TRAILING_SEVEN = re.compile(r"(?<!\d)(\d)[/|\\](?!\d)")
 
 # What `parse_ocr_text` puts in a row's `confidence`, and what those numbers mean.
 # They describe how legible the line was, not how likely the value is correct.
 CONFIDENCE_UNAMBIGUOUS_LINE = 0.9
 CONFIDENCE_AMBIGUOUS_LINE = 0.75
+
+# Labels that name a number instead of being the day's demand count. A written
+# log carries "Table 6" or "tips 3" beside the covers all the time, and taking
+# the last integer on such a line imported the table number as the visitor
+# count. Only words that unambiguously annotate a number are listed: "covers"
+# and "visitors" are labels for the *count* and must stay eligible.
+_ANNOTATION_LABELS = frozenset(
+    {
+        "table",
+        "tables",
+        "tip",
+        "tips",
+        "room",
+        "rooms",
+        "ref",
+        "no",
+        "nr",
+        "pax",
+        "note",
+        "notes",
+        "page",
+        "pg",
+        "staff",
+        "order",
+        "orders",
+        "id",
+    }
+)
+
+# The platform's own storage ceiling, mirrored from
+# ``app.services.ingestion.normaliser.MAX_DEMAND_QTY`` so this module stays free
+# of database imports. ``test_drift_ocr_jobs.py`` asserts the two agree.
+MAX_PLAUSIBLE_DEMAND = 10_000_000
 
 # Pre-processing is deliberately conservative: phone photos are usually large
 # enough but skewed or low-contrast, while a tiny thumbnail is unreadable at any
@@ -217,7 +253,74 @@ def validate_image_upload(content: bytes, filename: str | None = None) -> ImageI
     return ImageInfo(width=width, height=height, format=fmt)
 
 
+@dataclass(frozen=True, slots=True)
+class _Preprocess:
+    """How the image handed to Tesseract relates to the upload.
+
+    Tesseract's boxes are in the coordinates of the straightened, upscaled,
+    padded copy it read, not of the photo the operator is looking at. The review
+    screen draws its highlights on the photo, so those boxes have to be mapped
+    back through every step this module applied.
+    """
+
+    scale: float
+    angle: float
+    border: int
+    source_size: tuple[int, int]
+    rotated_size: tuple[int, int]
+
+    def box_to_source(
+        self, box: tuple[int, int, int, int]
+    ) -> tuple[float, float, float, float] | None:
+        """One OCR box as ``(x, y, w, h)`` fractions of the original photo.
+
+        Fractions rather than pixels, because the review screen sizes the photo
+        to its container and a pixel offset from the OCR copy would not line up
+        with it at any other size.
+
+        The deskew step rotates the content about its centre and the padding is
+        added afterwards, so undoing it is: drop the padding, rotate each corner
+        back about the centre of the rotated content, then divide by the scale
+        the upscale applied. Corners are transformed and re-bounded because a
+        rotated rectangle is not axis-aligned; the highlight is an axis-aligned
+        box around the same ink, which is what an overlay can draw.
+        """
+        width, height = self.source_size
+        if width <= 0 or height <= 0:
+            return None
+        theta = math.radians(self.angle)
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        cx = self.rotated_size[0] / 2
+        cy = self.rotated_size[1] / 2
+        left, top, w, h = box
+        corners: list[tuple[float, float]] = []
+        for x, y in ((left, top), (left + w, top), (left, top + h), (left + w, top + h)):
+            dx = (x - self.border) - cx
+            dy = (y - self.border) - cy
+            # Inverse of PIL's rotate(angle, expand=True): its forward map is
+            # (dx·cos + dy·sin, -dx·sin + dy·cos) about the rotated centre.
+            corners.append(
+                (
+                    (dx * cos_t - dy * sin_t) / self.scale + width / 2,
+                    (dx * sin_t + dy * cos_t) / self.scale + height / 2,
+                )
+            )
+        xs = [corner[0] for corner in corners]
+        ys = [corner[1] for corner in corners]
+        return (
+            round(max(0.0, min(xs)) / width, 4),
+            round(max(0.0, min(ys)) / height, 4),
+            round(min(width, max(xs) - min(xs)) / width, 4),
+            round(min(height, max(ys) - min(ys)) / height, 4),
+        )
+
+
 def _prepare_image(content: bytes):  # type: ignore[no-untyped-def]
+    """The image Tesseract should read for this upload (see :func:`_preprocess`)."""
+    return _preprocess(content)[0]
+
+
+def _preprocess(content: bytes) -> tuple[Any, _Preprocess]:
     """Decode, orient, upscale and normalise an image for Tesseract.
 
     EXIF rotation is applied first: a portrait phone photo stored landscape is
@@ -225,6 +328,9 @@ def _prepare_image(content: bytes):  # type: ignore[no-untyped-def]
     white border added, both of which help Tesseract's layout analysis; no
     thresholding is applied because binarising handwriting can erase the very
     strokes that distinguish a 7 from a 1.
+
+    Returns the prepared image and the transform that maps its coordinates back
+    to the upload, which is what lets a row be highlighted on the photo.
     """
     from PIL import Image, ImageOps
 
@@ -242,7 +348,9 @@ def _prepare_image(content: bytes):  # type: ignore[no-untyped-def]
     if image.mode not in ("L", "RGB"):
         image = image.convert("RGB")
 
+    source_size = image.size
     width, height = image.size
+    scale = 1.0
     shortest = min(width, height)
     if shortest and shortest < _UPSCALE_BELOW_EDGE:
         factor = min(_UPSCALE_TO_EDGE / shortest, _MAX_UPSCALE)
@@ -252,16 +360,28 @@ def _prepare_image(content: bytes):  # type: ignore[no-untyped-def]
                 (max(1, int(width * factor)), max(1, int(height * factor))),
                 resample,
             )
+            # Recorded as what was actually applied, not the requested factor:
+            # the resize rounds to whole pixels (and to a minimum of 1).
+            scale = image.size[0] / width if width else 1.0
 
     gray = ImageOps.grayscale(image)
     # Lighting first: a shadow crossing the page reads as a tilt to the deskew
     # search (it changes how dark pixels fall across rows), so flattening it
     # before measuring the angle is what keeps a well-lit page unrotated.
     gray = _flatten_illumination(gray)
-    gray = _deskew(gray)
+    gray, angle = _deskew(gray)
+    rotated_size = gray.size
     # A small quiet border keeps text away from the crop edge, where Tesseract's
     # layout analysis otherwise drops the first/last line of a tight photo.
-    return ImageOps.expand(gray, border=16, fill=255)
+    border = 16
+    prepared = ImageOps.expand(gray, border=border, fill=255)
+    return prepared, _Preprocess(
+        scale=scale,
+        angle=angle,
+        border=border,
+        source_size=source_size,
+        rotated_size=rotated_size,
+    )
 
 
 def _row_projection_score(image):  # type: ignore[no-untyped-def]
@@ -276,7 +396,7 @@ def _row_projection_score(image):  # type: ignore[no-untyped-def]
 
 
 def _deskew(gray):  # type: ignore[no-untyped-def]
-    """Straighten a page photographed a few degrees off square.
+    """Straighten a page photographed a few degrees off square, and report the angle.
 
     Tesseract's line finding wants a roughly horizontal baseline: a 4.5-degree
     tilt was enough to lose a line and misread another. The angle is chosen on a
@@ -306,9 +426,11 @@ def _deskew(gray):  # type: ignore[no-untyped-def]
     # A page that is already square must not be rotated on noise: only a clear
     # improvement in line alignment is worth blurring the photo to achieve.
     if best_angle == 0.0 or best_score < zero_score * 1.01:
-        return gray
+        return gray, 0.0
     logger.info("deskewing photo by %.0f degrees", best_angle)
-    return gray.rotate(best_angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
+    # The angle travels with the image: a box Tesseract reports is in rotated
+    # coordinates, and mapping it back to the photo needs this exact value.
+    return gray.rotate(best_angle, resample=Image.BICUBIC, expand=True, fillcolor=255), best_angle
 
 
 def _flatten_illumination(gray):  # type: ignore[no-untyped-def]
@@ -434,14 +556,134 @@ def _find_date(
     return None, None
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedRow:
+    """A row the parser accepted, with the line and spans it came from.
+
+    The spans are what let the Tesseract path attach the engine's bounding boxes
+    to the exact value that was chosen, rather than to the whole line.
+    """
+
+    line_index: int
+    line_text: str
+    date: datetime.date
+    demand_qty: int
+    confidence: float
+    date_span: tuple[int, int]
+    count_span: tuple[int, int]
+
+    def as_row(self, row_index: int) -> dict[str, Any]:
+        return {
+            "row_index": row_index,
+            "date": self.date.isoformat(),
+            "demand_qty": self.demand_qty,
+            "location": None,
+            "notes": None,
+            "confidence": self.confidence,
+            # Where on the photo the value was read, as fractions of the upload.
+            # ``None`` until an engine reports geometry (the local one does).
+            "boxes": {"date": None, "demand_qty": None},
+        }
+
+
+def _preceding_word(line: str, start: int) -> str:
+    """The word immediately before ``start``, lowercased with punctuation trimmed."""
+    index = start - 1
+    while index >= 0 and line[index].isspace():
+        index -= 1
+    end = index + 1
+    while index >= 0 and (line[index].isalpha() or line[index] in ".#:\u2013-"):
+        index -= 1
+    return line[index + 1 : end].strip(".#:\u2013-").lower()
+
+
+def _count_candidates(
+    line: str, date_span: tuple[int, int]
+) -> list[tuple[int, int, int, int, bool]]:
+    """Every integer on the line that could be the demand count.
+
+    Each entry is ``(value, distance_to_date, start, end, corrected)``, ordered
+    nearest the date first. Integers inside the date are not candidates, and a
+    number directly preceded by an annotation label ("Table 6", "tips 3") is
+    not a count either — taking it was how a table number became a visitor
+    count and got committed as one.
+    """
+    candidates: list[tuple[int, int, int, int, bool]] = []
+    for match in _INT.finditer(line):
+        start, end = match.span()
+        if date_span[0] <= start < date_span[1]:
+            continue
+        if _preceding_word(line, start) in _ANNOTATION_LABELS:
+            continue
+        value = int(match.group(1))
+        corrected = False
+        # Tesseract frequently reads a terminal 7 as '/' when it ends a count
+        # ("2/" is 27). Only the single-digit form is corrected, and only when
+        # no further digit follows: "2/05" is a date fragment, not 27.
+        if len(match.group(1)) == 1 and end < len(line) and line[end] in "/|\\":
+            if end + 1 >= len(line) or not line[end + 1].isdigit():
+                value = value * 10 + 7
+                corrected = True
+                end += 1
+        distance = min(abs(start - date_span[1]), abs(date_span[0] - end))
+        candidates.append((value, distance, start, end, corrected))
+    candidates.sort(key=lambda candidate: (candidate[1], candidate[2]))
+    return candidates
+
+
+def _parse_lines(lines: list[str], *, day_first: bool) -> list[_ParsedRow]:
+    """The parser proper, keeping the line and spans each row came from.
+
+    ``parse_ocr_text`` returns plain dicts; the Tesseract path needs the spans as
+    well, so it can attach the engine's boxes to the value that was chosen.
+    """
+    parsed: list[_ParsedRow] = []
+    for line_index, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+        date, span = _find_date(line, day_first=day_first)
+        if date is None or span is None:
+            continue
+        candidates = _count_candidates(line, span)
+        if not candidates:
+            continue
+        demand_qty, _, count_start, count_end, corrected = candidates[0]
+        # A readability signal, not a calibrated probability. One candidate means
+        # the count was unambiguous; several means the nearest to the date was
+        # chosen for the operator, which is a guess worth flagging. The remote
+        # service supplies its own real score instead — `engine` on the preview
+        # records which of the two this is.
+        confidence = (
+            CONFIDENCE_UNAMBIGUOUS_LINE
+            if len(candidates) == 1 and not corrected
+            else CONFIDENCE_AMBIGUOUS_LINE
+        )
+        parsed.append(
+            _ParsedRow(
+                line_index=line_index,
+                line_text=line,
+                date=date,
+                demand_qty=demand_qty,
+                confidence=confidence,
+                date_span=span,
+                count_span=(count_start, count_end),
+            )
+        )
+    return parsed
+
+
 def parse_ocr_text(text: str, *, day_first: bool | None = None) -> list[dict[str, Any]]:
     """Parse OCR text into candidate ``{date, demand_qty}`` rows.
 
     Each output line is expected to carry one date and one demand count,
-    typically ``"12/01/2026   112"``. The date is stripped first and the last
-    standalone integer left on the line becomes the demand quantity, which
-    tolerates trailing notes. Lines without both a date and a count are
-    skipped rather than guessed at.
+    typically ``"12/01/2026   112"``. The count is the number nearest the date
+    that is neither a date fragment nor the value of a label such as
+    ``"Table 6"``, so a note beside the count no longer replaces it. Lines
+    without both a date and a count are skipped rather than guessed at.
+
+    A count of ``0`` is a real day (a restaurant that served nobody) and is kept;
+    negative values are what the platform refuses.
 
     Numeric dates are accepted in both day-first and month-first order when
     one reading is invalid (``31/12/2026`` and ``12/31/2026`` both parse).
@@ -457,51 +699,15 @@ def parse_ocr_text(text: str, *, day_first: bool | None = None) -> list[dict[str
 
     Returns:
         Candidate rows with ``row_index``, ISO ``date``, ``demand_qty``,
-        ``confidence`` and provenance in ``notes``.
+        ``confidence``, provenance in ``notes``, and ``boxes`` holding the
+        on-photo position of each value when the engine reported one.
     """
     if day_first is None:
         day_first = _infer_day_first(text)
-    rows: list[dict[str, Any]] = []
-    idx = 0
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        date, span = _find_date(line, day_first=day_first)
-        if date is None or span is None:
-            continue
-        remainder = line[: span[0]] + " " + line[span[1] :]
-        corrected_glyph = bool(_TRAILING_SEVEN.search(remainder))
-        if corrected_glyph:
-            remainder = _TRAILING_SEVEN.sub(r"\g<1>7", remainder)
-        counts = _INT.findall(remainder)
-        if not counts:
-            continue
-        demand_qty = int(counts[-1])
-        if demand_qty <= 0:
-            continue
-        # A readability signal, not a calibrated probability. Exactly one number
-        # left on the line means the count was unambiguous; several means the last
-        # one was chosen for the operator, which is a guess worth flagging. The
-        # remote service supplies its own real score instead — `engine` on the
-        # preview records which of the two this is.
-        confidence = (
-            CONFIDENCE_UNAMBIGUOUS_LINE
-            if len(counts) == 1 and not corrected_glyph
-            else CONFIDENCE_AMBIGUOUS_LINE
-        )
-        rows.append(
-            {
-                "row_index": idx,
-                "date": date.isoformat(),
-                "demand_qty": demand_qty,
-                "location": None,
-                "notes": None,
-                "confidence": confidence,
-            }
-        )
-        idx += 1
-    return rows
+    return [
+        parsed.as_row(index)
+        for index, parsed in enumerate(_parse_lines(text.splitlines(), day_first=day_first))
+    ]
 
 
 def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list[dict[str, Any]]:
@@ -513,7 +719,16 @@ def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list
     )
     resp.raise_for_status()
     payload = resp.json()
-    raw_rows = payload.get("rows", payload if isinstance(payload, list) else [])
+    # A service may answer either ``{"rows": [...]}`` or a bare JSON array. The
+    # list case has to be checked *before* calling ``.get`` — the old one-liner
+    # did it inside `get`'s default argument, which is only evaluated for a dict,
+    # so an array body raised AttributeError and the rows were thrown away.
+    if isinstance(payload, dict):
+        raw_rows = payload.get("rows", [])
+    elif isinstance(payload, list):
+        raw_rows = payload
+    else:
+        raw_rows = []
     rows: list[dict[str, Any]] = []
     for idx, item in enumerate(raw_rows):
         if not isinstance(item, dict):
@@ -527,7 +742,9 @@ def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list
             demand_qty = int(qty_raw)
         except (TypeError, ValueError):
             continue
-        if demand_qty <= 0:
+        # Zero is a service day with no visitors, which the platform stores; only
+        # a negative count is impossible. Dropping zero silently lost that day.
+        if demand_qty < 0:
             continue
         rows.append(
             {
@@ -537,6 +754,9 @@ def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list
                 "location": None,
                 "notes": None,
                 "confidence": float(item.get("confidence", 0.9)),
+                # A remote service is not required to report geometry; when it
+                # does not, the review screen simply draws no highlight.
+                "boxes": None,
             }
         )
     return rows
@@ -547,8 +767,9 @@ def _page_segmentation_modes() -> list[int]:
 
     ``6`` assumes a uniform block of text and is the best default for a written
     log. ``4`` and ``11`` cover multi-column and sparse layouts; running all
-    three and keeping the extraction with the most rows is a cheap way to be
-    robust to an unfamiliar page without pulling in a layout model.
+    three and keeping the best-scoring extraction is a cheap way to be robust to
+    an unfamiliar page without pulling in a layout model. "Best" is decided by
+    :func:`_extraction_score`, not by which mode returned the most rows.
     """
     raw = str(getattr(get_settings(), "ocr_psm_modes", "6,4,11"))
     modes: list[int] = []
@@ -562,13 +783,36 @@ def _page_segmentation_modes() -> list[int]:
     return modes or [6]
 
 
-def _mean_word_confidence(
-    image, language: str, psm: int, timeout: float  # type: ignore[no-untyped-def]
-) -> float | None:
-    """Mean Tesseract word confidence for one segmentation mode (0-1).
+@dataclass(frozen=True, slots=True)
+class _Word:
+    """One Tesseract word: where it sits in its line, and its box."""
+
+    start: int  # offset into the line with its whitespace removed
+    end: int
+    box: tuple[int, int, int, int]
+
+
+def _line_key(text: str) -> str:
+    """A line's text with whitespace removed, used to match OCR passes up."""
+    return "".join(text.split())
+
+
+def _squeezed_span(line: str, span: tuple[int, int]) -> tuple[int, int]:
+    """A character span in ``line``, re-expressed without the whitespace."""
+    return (len(_line_key(line[: span[0]])), len(_line_key(line[: span[1]])))
+
+
+def _read_word_data(  # type: ignore[no-untyped-def]
+    image, language: str, psm: int, timeout: float
+) -> tuple[float | None, dict[str, list[_Word]]]:
+    """Tesseract's words for one mode: mean confidence, and boxes grouped by line.
 
     Word confidence is a real engine score, unlike the line-legibility value in
     each row; the preview reports it separately so the two are never conflated.
+
+    Lines are keyed by their text with whitespace removed, so a row parsed from
+    ``image_to_string`` can be matched to the geometry reported by
+    ``image_to_data`` — the two calls word the same page slightly differently.
     """
     import pytesseract
 
@@ -587,17 +831,101 @@ def _mean_word_confidence(
             config=f"--psm {psm}",
             output_type=pytesseract.Output.DICT,
         )
+
     scores: list[float] = []
-    for raw in data.get("conf", []):
+    grouped: dict[tuple[int, int, int], list[tuple[str, tuple[int, int, int, int]]]] = {}
+    order: list[tuple[int, int, int]] = []
+    for index, raw_text in enumerate(data.get("text", [])):
         try:
-            value = float(raw)
-        except (TypeError, ValueError):
+            score = float(data["conf"][index])
+        except (KeyError, IndexError, TypeError, ValueError):
+            score = -1.0
+        if score >= 0:
+            scores.append(score)
+        word = (raw_text or "").strip()
+        if not word:
             continue
-        if value >= 0:
-            scores.append(value)
-    if not scores:
+        try:
+            key = (
+                int(data["block_num"][index]),
+                int(data["par_num"][index]),
+                int(data["line_num"][index]),
+            )
+            box = (
+                int(data["left"][index]),
+                int(data["top"][index]),
+                int(data["width"][index]),
+                int(data["height"][index]),
+            )
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append((word, box))
+
+    by_line: dict[str, list[_Word]] = {}
+    for key in order:
+        offset = 0
+        words: list[_Word] = []
+        for word, box in grouped[key]:
+            words.append(_Word(start=offset, end=offset + len(word), box=box))
+            offset += len(word)
+        by_line.setdefault(_line_key(" ".join(word for word, _ in grouped[key])), words)
+
+    mean_confidence = round(sum(scores) / len(scores) / 100.0, 4) if scores else None
+    return mean_confidence, by_line
+
+
+def _union_box(words: list[_Word], span: tuple[int, int]) -> tuple[int, int, int, int] | None:
+    """The smallest box covering every word that overlaps ``span``."""
+    selected = [word for word in words if word.start < span[1] and word.end > span[0]]
+    if not selected:
         return None
-    return round(sum(scores) / len(scores) / 100.0, 4)
+    left = min(word.box[0] for word in selected)
+    top = min(word.box[1] for word in selected)
+    right = max(word.box[0] + word.box[2] for word in selected)
+    bottom = max(word.box[1] + word.box[3] for word in selected)
+    return left, top, right - left, bottom - top
+
+
+def _attach_boxes(
+    parsed: list[_ParsedRow],
+    rows: list[dict[str, Any]],
+    words_by_line: dict[str, list[_Word]],
+    prep: _Preprocess,
+) -> None:
+    """Record where each row's date and count were read, on the photo."""
+    for parsed_row, row in zip(parsed, rows):
+        words = words_by_line.get(_line_key(parsed_row.line_text))
+        if not words:
+            continue
+        date_box = _union_box(words, _squeezed_span(parsed_row.line_text, parsed_row.date_span))
+        count_box = _union_box(words, _squeezed_span(parsed_row.line_text, parsed_row.count_span))
+        row["boxes"] = {
+            "date": prep.box_to_source(date_box) if date_box else None,
+            "demand_qty": prep.box_to_source(count_box) if count_box else None,
+        }
+
+
+def _extraction_score(
+    rows: list[dict[str, Any]], mean_confidence: float | None
+) -> tuple[int, int, int, float]:
+    """How good one segmentation mode's extraction looks, best score last.
+
+    Row count alone is not accuracy: a mode that splits every line in two can
+    report more rows than the mode that read the page correctly, and committing
+    its duplicates would be worse than missing a day. Distinct dates are the
+    coverage that actually matters, duplicate dates are evidence of a misread
+    split, and a count above the platform ceiling could not be stored at all.
+    """
+    dates = [str(row.get("date")) for row in rows]
+    distinct = len(set(dates))
+    duplicates = len(dates) - distinct
+    plausible = sum(
+        1 for row in rows if 0 <= int(row.get("demand_qty") or 0) <= MAX_PLAUSIBLE_DEMAND
+    )
+    return (distinct, -duplicates, plausible, mean_confidence or 0.0)
 
 
 def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
@@ -610,9 +938,10 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
     """
     import pytesseract
 
-    image = _prepare_image(content)
+    image, prep = _preprocess(content)
     timeout = float(getattr(get_settings(), "ocr_timeout_seconds", 30.0))
     best: ImageExtraction | None = None
+    best_score: tuple[int, int, int, float] | None = None
     failures: list[str] = []
 
     for psm in _page_segmentation_modes():
@@ -626,13 +955,18 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
             failures.append(f"psm {psm}: {exc}")
             continue
 
-        rows = parse_ocr_text(text)
-        if not rows:
+        parsed = _parse_lines(text.splitlines(), day_first=_infer_day_first(text))
+        if not parsed:
             continue
+        rows = [row.as_row(index) for index, row in enumerate(parsed)]
         try:
-            mean_confidence = _mean_word_confidence(image, language, psm, timeout)
+            mean_confidence, words_by_line = _read_word_data(image, language, psm, timeout)
         except Exception:
-            mean_confidence = None
+            mean_confidence, words_by_line = None, {}
+        if words_by_line:
+            _attach_boxes(parsed, rows, words_by_line, prep)
+
+        score = _extraction_score(rows, mean_confidence)
         candidate = ImageExtraction(
             rows=rows,
             engine=ENGINE_TESSERACT,
@@ -640,15 +974,12 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
                 "page_segmentation_mode": psm,
                 "mean_confidence": mean_confidence,
                 "rows": len(rows),
+                "distinct_dates": score[0],
+                "duplicate_dates": -score[1],
             },
         )
-        if best is None:
-            best = candidate
-            continue
-        best_score = (len(best.rows), best.quality.get("mean_confidence") or 0.0)
-        candidate_score = (len(rows), mean_confidence or 0.0)
-        if candidate_score > best_score:
-            best = candidate
+        if best is None or best_score is None or score > best_score:
+            best, best_score = candidate, score
 
     if best is not None:
         return best
@@ -761,6 +1092,44 @@ def _note_for(extraction: ImageExtraction) -> str:
     )
 
 
+def _row_warnings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dates that were read more than once, and whether their counts disagree.
+
+    Two rows for one service day cannot both be stored: the commit upserts on
+    ``(location_id, date)``, so the later row silently replaces the earlier one
+    in a list the operator was asked to check. Naming the dates here lets the
+    review screen say so before the import rather than after it.
+    """
+    by_date: dict[str, list[int]] = {}
+    for index, row in enumerate(rows):
+        by_date.setdefault(str(row.get("date")), []).append(index)
+
+    warnings: list[dict[str, Any]] = []
+    for date in sorted(by_date):
+        indexes = by_date[date]
+        if len(indexes) < 2:
+            continue
+        quantities = [rows[index]["demand_qty"] for index in indexes]
+        conflicting = len(set(quantities)) > 1
+        counts = ", ".join(str(quantity) for quantity in quantities)
+        warnings.append(
+            {
+                "code": "conflicting_date" if conflicting else "duplicate_date",
+                "date": date,
+                "row_indexes": indexes,
+                "demand_qtys": quantities,
+                "message": (
+                    f"{date} was read {len(indexes)} times with different counts "
+                    f"({counts}); only one row can be imported for that day"
+                    if conflicting
+                    else f"{date} was read {len(indexes)} times; only one row "
+                    "can be imported for that day"
+                ),
+            }
+        )
+    return warnings
+
+
 def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
     """Build the preview payload stored on ``ingest_uploads.preview`` for images.
 
@@ -778,6 +1147,7 @@ def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
             "row_count": 0,
             "engine": ENGINE_NONE,
             "note": f"{exc}. Add the rows manually, or upload a valid image.",
+            "warnings": [],
             "quality": {"width": None, "height": None, "format": None},
             "extracted_at": datetime.datetime.now(datetime.UTC).isoformat(),
         }
@@ -791,6 +1161,9 @@ def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
         # engine that actually produced it (see `extract_rows_with_engine`).
         "engine": extraction.engine,
         "note": _note_for(extraction),
+        # Duplicate or conflicting dates, so the screen can raise them before the
+        # operator commits rows that would overwrite each other.
+        "warnings": _row_warnings(extraction.rows),
         # Measured engine metadata, separate from each row's line-legibility
         # score: dimensions help explain a failed read, and mean_confidence is a
         # real Tesseract/vision-model score rather than a heuristic.

@@ -24,6 +24,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
@@ -699,7 +700,10 @@ async def upload_image(
     except ImageValidationError as exc:
         raise _error(400, "invalid_image", str(exc), field="file") from None
 
-    preview = preview_for_image(data, file.filename)
+    # OCR is CPU-bound (three Tesseract passes plus geometry) or a slow remote
+    # call, and this handler is `async`: running it inline would freeze the
+    # event loop — and every other request on the worker — for the whole read.
+    preview = await run_in_threadpool(preview_for_image, data, file.filename)
 
     upload = IngestUpload(
         id=uuid.uuid4(),
@@ -757,6 +761,10 @@ def get_image_job(
         # decoded dimensions). Kept separate from each row's confidence, which
         # for the local parser is a readability signal rather than a probability.
         "quality": preview.get("quality"),
+        # A date read twice cannot be imported twice: the commit upserts on
+        # (location, date). The screen raises these before the import instead of
+        # letting one row silently overwrite the other.
+        "warnings": preview.get("warnings", []),
         "note": preview.get("note"),
     }
 

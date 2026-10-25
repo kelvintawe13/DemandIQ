@@ -1,10 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronsUpDownIcon, FileTextIcon, CircleCheckBigIcon, ArrowRightIcon } from 'lucide-react';
 import { Modal, ModalButton } from './ui/Modal';
 import { EmptyState } from './ui/EmptyState';
 import { useToast } from '../contexts/ToastContext';
 import { api, ApiException } from '../api/client';
 import { todayISO } from '../lib/workspaceTime';
+
+/**
+ * Where the engine read a value, as fractions of the uploaded photo.
+ *
+ * Fractions, not pixels: the review screen sizes the photo to its container, so
+ * a pixel offset from the copy the engine read would not line up at any other
+ * size.
+ */
+interface RowBoxes {
+  date?: number[] | null;
+  demand_qty?: number[] | null;
+}
 
 interface ExtractedRow {
   row_index?: number;
@@ -14,6 +26,7 @@ interface ExtractedRow {
   location?: string | null;
   notes?: string | null;
   confidence?: number | null;
+  boxes?: RowBoxes | null;
 }
 
 interface PreviewPanelProps {
@@ -29,6 +42,8 @@ interface EditingRow {
   confidence?: number | null;
   /** True for a row the operator typed themselves — it has no engine score. */
   handAdded?: boolean;
+  /** Where the engine read this row on the photo, when it reported geometry. */
+  boxes?: RowBoxes | null;
 }
 
 interface ImageJobResponse {
@@ -65,9 +80,9 @@ const AMBIGUOUS_LINE = 0.8;
  * for both would be a quiet lie. A remote vision service returns a real model
  * score, so that is reported as a percentage. The local parser's value counts how
  * many numbers survived on the line after the date was stripped — 0.9 means the
- * demand count was the only candidate, 0.75 means several were and the last was
- * taken for the operator. That is a readability signal, so it is described in
- * words and never dressed up as a probability.
+ * demand count was the only candidate, 0.75 means several were and the nearest
+ * to the date was taken for the operator. That is a readability signal, so it is
+ * described in words and never dressed up as a probability.
  */
 function scoreNote(engine: string | null | undefined, row: EditingRow): { label: string; flagged: boolean } {
   if (row.handAdded) return { label: 'Added by hand', flagged: false };
@@ -89,6 +104,18 @@ const ENGINE_LABEL: Record<string, string> = {
   tesseract: 'Read by the local OCR engine',
 };
 
+/** Position of a highlight box over the photo, from an OCR box in fractions. */
+function boxStyle(box?: number[] | null): CSSProperties | undefined {
+  if (!box || box.length !== 4 || box.some((value) => !Number.isFinite(value))) return undefined;
+  const [left, top, width, height] = box;
+  return {
+    left: `${left * 100}%`,
+    top: `${top * 100}%`,
+    width: `${width * 100}%`,
+    height: `${height * 100}%`,
+  };
+}
+
 export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [imported, setImported] = useState(false);
@@ -109,6 +136,10 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   const [editingRows, setEditingRows] = useState<EditingRow[]>([]);
   const [commitLoading, setCommitLoading] = useState(false);
   const [commitError, setCommitError] = useState<{ message: string; reference?: string | null } | null>(null);
+  /** The stored photo, so rows can be checked against what they were read from. */
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  /** The row the operator is on, so its highlights are the pointed-at ones. */
+  const [activeRow, setActiveRow] = useState<number | null>(null);
 
   /** The job the panel is showing now; a late response for an older one is ignored. */
   const jobIdRef = useRef<string | null>(jobId ?? null);
@@ -160,7 +191,8 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
         rows.map((r) => ({
           date: String(r.date ?? ''),
           demand_qty: Number(r.demand_qty ?? r.visitors ?? 0),
-          confidence: r.confidence ?? null
+          confidence: r.confidence ?? null,
+          boxes: r.boxes ?? null
         }))
       );
       // if rows empty but status not committed, keep polling maybe
@@ -196,10 +228,42 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
       setImported(false);
       setLoadedJobId(null);
       setFetching(false);
+      setActiveRow(null);
       return;
     }
     void fetchJob(jobId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  // The stored photo, fetched separately from the rows: it is the thing the
+  // operator is asked to check them against, and a review without it is just
+  // another table. Fetching happens on the job id and nowhere else, so editing a
+  // row never re-downloads the image.
+  useEffect(() => {
+    if (!jobId) {
+      setPhotoUrl(null);
+      return;
+    }
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setPhotoUrl(null);
+    void (async () => {
+      try {
+        const blob = await api.blob(`/api/v1/ingest/uploads/${jobId}/source`);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPhotoUrl(objectUrl);
+      } catch {
+        // The photo is a review aid, not a requirement: an upload from before
+        // originals were kept, or a browser without blob URLs, still leaves the
+        // rows editable — so the panel simply shows no highlights.
+        if (!cancelled) setPhotoUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [jobId]);
 
   const handleCommit = async () => {
@@ -266,6 +330,32 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   /** Rows the engine flagged, or that the parser found ambiguous. */
   const flaggedRows = editingRows.filter((row) => scoreNote(engine, row).flagged);
 
+  /**
+   * Dates entered more than once. The commit upserts on (location, date), so only
+   * one row per day can survive — the later one silently replaces the earlier.
+   * Derived from the rows being edited rather than from the server's read, so
+   * correcting a date here updates the warning immediately.
+   */
+  const duplicateDates = (() => {
+    const byDate = new Map<string, number[]>();
+    editingRows.forEach((row, index) => {
+      if (!row.date) return;
+      byDate.set(row.date, [...(byDate.get(row.date) ?? []), index]);
+    });
+    return [...byDate.entries()]
+      .filter(([, indexes]) => indexes.length > 1)
+      .map(([date, indexes]) => {
+        const quantities = indexes.map((index) => Number(editingRows[index].demand_qty));
+        return {
+          date,
+          indexes,
+          conflicting: new Set(quantities).size > 1,
+          quantities
+        };
+      });
+  })();
+  const duplicateRowIndexes = new Set(duplicateDates.flatMap((duplicate) => duplicate.indexes));
+
   // If no job, show empty state per spec
   const showEmptyNoImage = !hasJob;
 
@@ -308,6 +398,65 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
         </div>
 
         <div className="bg-white px-3 pb-4 pt-3 sm:px-4">
+          {/* The photo the rows were read from, with each date and count boxed
+              where the engine found it. Checking a row against a disconnected
+              table is guesswork; this is the comparison the panel is asking for. */}
+          {photoUrl && editingRows.length > 0 && (
+            <figure className="mb-3">
+              <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                <img
+                  src={photoUrl}
+                  alt={imageName ? `Photo of ${imageName}` : 'Photo of the uploaded log'}
+                  className="block w-full"
+                />
+                {editingRows.map((row, idx) => {
+                  const dateStyle = boxStyle(row.boxes?.date);
+                  const countStyle = boxStyle(row.boxes?.demand_qty);
+                  if (!dateStyle && !countStyle) return null;
+                  return (
+                    <span key={idx} aria-hidden="true">
+                      {dateStyle && (
+                        <span
+                          data-ocr-box="date"
+                          style={dateStyle}
+                          className={[
+                            'absolute rounded-sm border-2',
+                            activeRow === idx
+                              ? 'border-brand-600 bg-brand-400/25'
+                              : 'border-brand-400/70 bg-brand-400/10'
+                          ].join(' ')}
+                        />
+                      )}
+                      {countStyle && (
+                        <span
+                          data-ocr-box="demand_qty"
+                          style={countStyle}
+                          className={[
+                            'absolute rounded-sm border-2',
+                            activeRow === idx
+                              ? 'border-amber-600 bg-amber-400/30'
+                              : 'border-amber-400/70 bg-amber-400/15'
+                          ].join(' ')}
+                        />
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <figcaption className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-fine text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-3 rounded-sm border border-brand-400 bg-brand-400/20" />
+                  date
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-3 rounded-sm border border-amber-400 bg-amber-400/20" />
+                  visitors
+                </span>
+                <span>Highlights are approximate once the photo is straightened.</span>
+              </figcaption>
+            </figure>
+          )}
+
           <div className="flex items-center gap-8 px-1 pb-3 sm:gap-10">
             <span className="flex items-center gap-1.5 text-control font-semibold text-slate-800">
               Date
@@ -401,6 +550,24 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
               </div>
             </div>
           ) : (              <div className="flex flex-col gap-3">
+              {duplicateDates.length > 0 && (
+                <p
+                  role="note"
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-caption leading-relaxed text-red-800"
+                >
+                  <span className="font-semibold">
+                    {duplicateDates.length} date{duplicateDates.length === 1 ? '' : 's'} repeated
+                  </span>{' '}
+                  — only one row per day can be imported, so the later one would replace the
+                  earlier. {duplicateDates
+                    .map((duplicate) =>
+                      duplicate.conflicting
+                        ? `${duplicate.date} (${duplicate.quantities.join(' / ')})`
+                        : duplicate.date
+                    )
+                    .join(', ')}
+                </p>
+              )}
               {flaggedRows.length > 0 && (
                 <p
                   role="note"
@@ -423,7 +590,15 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                 {editingRows.map((row, idx) => {
                   const note = scoreNote(engine, row);
                   return (
-                    <li key={idx} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                    <li
+                      key={idx}
+                      // Pointing at a row points at its place on the photo.
+                      onMouseEnter={() => setActiveRow(idx)}
+                      onMouseLeave={() => setActiveRow(null)}
+                      onFocusCapture={() => setActiveRow(idx)}
+                      onBlurCapture={() => setActiveRow(null)}
+                      className="flex flex-wrap items-center gap-2 px-3 py-2"
+                    >
                       <input
                         type="date"
                         aria-label={`Date for row ${idx + 1}`}
@@ -449,6 +624,11 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                       >
                         {note.label}
                       </span>
+                      {duplicateRowIndexes.has(idx) && (
+                        <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-fine font-medium text-red-700">
+                          Same date twice
+                        </span>
+                      )}
                     </li>
                   );
                 })}

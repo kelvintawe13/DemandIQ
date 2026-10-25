@@ -143,9 +143,18 @@ type: `POST /ingest/image` returns **400 `invalid_image`** for a non-image or an
 image above the pixel budget. The local engine applies EXIF orientation, a
 conservative upscale, illumination flattening and a deskew — in that order, for
 the reasons in *Photos of a page* — then tries Tesseract's uniform-block, column
-and sparse page-segmentation modes. `GET
-/ingest/image/{job_id}` reports the chosen mode and the measured mean word
-confidence under `quality`, separately from each row's line-legibility score.
+and sparse page-segmentation modes. The mode is chosen by distinct dates, then
+fewest repeated dates, then plausible counts, then word confidence — not by
+which one returned the most rows, because a mode that splits lines in two can
+always return more. `GET /ingest/image/{job_id}` reports the chosen mode and the
+measured mean word confidence under `quality`, separately from each row's
+line-legibility score.
+
+The count on a line is the number nearest the date that is neither part of the
+date nor the value of a label (`Table 6`, `tips 3`). Taking the last integer on
+the line, as the parser used to, imported the table number as the visitor count.
+A count of `0` is kept: a restaurant that served nobody has not stopped
+reporting, and the platform stores zero.
 
 ## OCR row scores (`../../PreviewPanel.tsx`)
 
@@ -156,15 +165,31 @@ produced it:
   shown as a percentage.
 - **`tesseract`** — the local parser's number is a **readability signal**, not a
   probability. `0.9` means one number was left on the line after the date (the
-  demand count was unambiguous); `0.75` means several were and the last was taken
-  for the operator. Those two are shown as *One number on the line* / *Several
-  numbers on the line — check*, never as "75% confident".
+  demand count was unambiguous); `0.75` means several were and the nearest to the
+  date was taken for the operator. Those two are shown as *One number on the
+  line* / *Several numbers on the line — check*, never as "75% confident".
 - A row with no score says **No score reported**, and a row the operator typed
   says **Added by hand** — neither invents a figure the engine never produced.
 
 A summary counts the rows worth a second look, and is absent when every row was
 unambiguous (a caveat that is always on is a caveat nobody reads). `engine`
 travels with the rows on `GET /ingest/image/{job_id}` for exactly this reason.
+
+Two more aids sit on the same screen, both for the same reason — a wrong or
+duplicated demand record is worse than a missing one, because nothing downstream
+can tell it from a real trading day:
+
+- **Highlights on the photo.** Each row's `boxes` give where the engine read its
+  date and its count, as fractions of the upload (`null` when the engine reported
+  no geometry). `PreviewPanel` fetches the stored photo from
+  `GET /ingest/uploads/{id}/source` and draws them over it, emphasising the row
+  the operator is on. The OCR copy is upscaled, straightened and padded, so the
+  backend maps every box back through those steps first; the caption says the
+  highlights are approximate once the page has been straightened.
+- **Repeated dates.** The commit upserts on `(location_id, date)`, so two rows
+  for one day become one and the later silently wins. The preview names the date
+  and both counts before the import, and marks both rows. The backend reports the
+  same list under `warnings` (`duplicate_date` / `conflicting_date`).
 
 ## Messy spreadsheets are the normal case
 

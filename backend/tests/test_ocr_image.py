@@ -17,6 +17,7 @@ from app.services.ingestion.image import (
     ImageValidationError,
     _page_segmentation_modes,
     _prepare_image,
+    _preprocess,
     _tesseract_extraction,
     validate_image_upload,
 )
@@ -69,6 +70,35 @@ def test_prepare_image_orients_upscales_and_normalises(monkeypatch) -> None:
     assert prepared.height > 20
 
 
+def test_a_box_maps_back_onto_the_photo_the_operator_sees() -> None:
+    """Highlights are drawn on the original upload, not on the OCR copy.
+
+    The copy the engine reads is upscaled, straightened and padded, so a box
+    reported in its coordinates is meaningless on the photo until every step is
+    undone. A dot at a known place in the photo is located in the prepared image
+    and must map back to the same place — otherwise the review screen would draw
+    its highlight somewhere the value is not.
+    """
+    pytest.importorskip("PIL")
+    from PIL import Image, ImageDraw
+
+    photo = Image.new("L", (240, 180), 255)
+    ImageDraw.Draw(photo).ellipse([192, 132, 208, 148], fill=0)  # centred on (200, 140)
+    buffer = io.BytesIO()
+    photo.save(buffer, format="PNG")
+
+    prepared, transform = _preprocess(buffer.getvalue())
+    pixels = prepared.load()
+    _, x, y = min(
+        (pixels[x, y], x, y) for y in range(prepared.height) for x in range(prepared.width)
+    )
+
+    box = transform.box_to_source((x - 2, y - 2, 4, 4))
+    assert box is not None
+    assert abs(box[0] * 240 + box[2] * 120 - 200) < 10
+    assert abs(box[1] * 180 + box[3] * 90 - 140) < 10
+
+
 def test_real_tesseract_reads_a_rendered_log() -> None:
     """The local path must be exercised, not only monkeypatched.
 
@@ -104,3 +134,16 @@ def test_real_tesseract_reads_a_rendered_log() -> None:
     assert extraction.rows, "the rendered log produced no OCR rows"
     assert any(row["demand_qty"] in (112, 87) for row in extraction.rows)
     assert extraction.quality.get("page_segmentation_mode") in _page_segmentation_modes()
+
+    # The review screen highlights each value on the photo, so a row has to
+    # carry where it was read. Fractions of the upload, in reading order: the
+    # date sits left of its count on this page.
+    row = next(row for row in extraction.rows if row["demand_qty"] in (112, 87))
+    date_box = row["boxes"]["date"]
+    count_box = row["boxes"]["demand_qty"]
+    assert date_box is not None and count_box is not None
+    for box in (date_box, count_box):
+        left, top, width, height = box
+        assert 0.0 <= left < 1.0 and 0.0 <= top < 1.0
+        assert 0.0 < width <= 1.0 and 0.0 < height <= 1.0
+    assert date_box[0] < count_box[0]

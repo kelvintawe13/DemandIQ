@@ -98,8 +98,9 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "Optional OCR/vision service for image ingestion: it receives the "
-            "uploaded image as multipart 'file' and returns {\"rows\": [...]}. "
-            "When unset, local Tesseract is used if installed."
+            "uploaded image as multipart 'file' and returns {\"rows\": [...]} "
+            "(a bare JSON array of rows is accepted too). When unset, local "
+            "Tesseract is used if installed."
         ),
     )
     ocr_language: str = Field(default="eng", description="Tesseract language pack for local OCR")
@@ -107,8 +108,10 @@ class Settings(BaseSettings):
         default="6,4,11",
         description=(
             "Comma-separated Tesseract page-segmentation modes to try, in order "
-            "(6 = uniform block, 4 = columns, 11 = sparse text). The extraction "
-            "with the most rows wins; a mode that fails is skipped."
+            "(6 = uniform block, 4 = columns, 11 = sparse text). The best-scoring "
+            "extraction wins — distinct dates, then fewest duplicate dates, then "
+            "plausible counts, then word confidence — not simply the most rows. "
+            "A mode that fails is skipped."
         ),
     )
     ocr_max_pixels: int = Field(
