@@ -384,208 +384,213 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
     fetchUploads(currentCursor, { force: true });
   };
 
-  return (
-    <>
-      {/* Recent uploads */}
-      <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-h5 font-bold tracking-tight text-slate-900">Recent uploads</h2>
-            <p className="text-meta text-slate-500">Staged files and image jobs, most recent first.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => fetchUploads(currentCursor)}
-            disabled={uploadsLoading || uploadsRefreshing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-meta font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            <RefreshCwIcon className={`h-3.5 w-3.5 ${uploadsRefreshing ? 'animate-spin' : ''}`} strokeWidth={1.9} />
-            {uploadsRefreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
+  /* Rendered at the foot of the screen: the upload panels are what the
+     operator came for, and the history belongs after them rather than pushing
+     the tabs below the fold. */
+  const recentUploads = (
+    <section className="mt-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-h5 font-bold tracking-tight text-slate-900">Recent uploads</h2>
+          <p className="text-meta text-slate-500">Staged files and image jobs, most recent first.</p>
         </div>
+        <button
+          type="button"
+          onClick={() => fetchUploads(currentCursor)}
+          disabled={uploadsLoading || uploadsRefreshing}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-meta font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+        >
+          <RefreshCwIcon className={`h-3.5 w-3.5 ${uploadsRefreshing ? 'animate-spin' : ''}`} strokeWidth={1.9} />
+          {uploadsRefreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
 
-        {uploadsLoading && !hasLoadedOnce ? (
-          <div className="mt-4 flex items-center justify-center gap-2.5 py-8">
-            <Spinner className="h-5 w-5" />
-            <span className="text-body-xs font-medium text-slate-600">Loading uploads…</span>
-          </div>
-        ) : uploadsError ? (
-          <div className="mt-4">
-            <EmptyState
-              size="sm"
-              variant={uploadsError.offline ? 'offline' : 'error'}
-              title={uploadsError.offline ? 'Backend offline' : 'Failed to load uploads'}
-              description={uploadsError.message + (uploadsError.reference ? ` (ref ${uploadsError.reference})` : '')}
-              hints={uploadsError.offline ? ['Backend unreachable. Data saved locally will sync when online.'] : uploadsError.reference ? [`Reference ${uploadsError.reference}`] : undefined}
-              action={{ label: 'Retry', onClick: () => fetchUploads(currentCursor) }}
-            />
-          </div>
-        ) : uploads.length === 0 ? (
-          <div className="mt-4">
-            <EmptyState
-              size="md"
-              variant="empty"
-              title="No imports yet"
-              description="Your staged files and image jobs will appear here"
-              hints={['Upload a CSV or image to get started', 'Manual entries appear after you save them']}
-              action={{ label: 'Upload a spreadsheet', onClick: () => setActiveTabId('excel') }}
-              secondaryAction={{ label: 'Add a row by hand', onClick: () => setActiveTabId('manual') }}
-            />
-          </div>
-        ) : (
-          <>            <div className="relative mt-4">
-              {uploadsRefreshing && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/70 backdrop-blur-[1px]">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-meta font-medium text-slate-700 shadow-sm ring-1 ring-slate-200">
-                    <Spinner className="h-4 w-4" />
-                    Refreshing…
-                  </span>
-                </div>
-              )}
-              <div className={uploadsRefreshing ? 'opacity-60' : ''}>
-                <ResponsiveTable<any>
-                caption="Your uploads"
-                minWidth="min-w-[520px]"
-                /* Ten rows a page is still taller than the panels around it,
-                   so the box is capped and its header pinned. */
-                maxHeight="max-h-[420px]"
-                rows={uploads}
-                rowKey={(row:any)=>String(row.id)}
-                columns={[
-                  { key:'file', label:'File', primary:true, render:(row:any)=> <span className="text-body-xs font-medium text-slate-800">{row.filename}</span> },
-                  { key:'kind', label:'How it came in', render:(row:any)=> describeKind(row.kind) },
-                  { key:'status', label:'Status', render:(row:any)=> <StatusPill tone={statusTone[row.status] ?? 'neutral'} dot>{plainStatus(row.status)}</StatusPill> },
-                  { key:'rows', label:'Rows', render:(row:any)=> <><span className="tabular-nums">{row.row_count}</span>{row.error_count > 0 && <span className="ml-1 text-red-600">({row.error_count} need fixing)</span>}</> },
-                  { key:'created', label:'Created', render:(row:any)=> row.created_at ? new Date(row.created_at).toLocaleString() : '—' },
-                  /* One actions cell rather than three empty-headed columns:
-                     the list already has five labelled columns and each extra
-                     sliver pushed the file name into a scroll. */
-                  { key:'actions', label:'', cellClassName:'pr-0', render:(row:any)=> (
-                      <div className="flex items-center justify-end gap-0.5">
-                        {row.has_source && (
-                          <button
-                            type="button"
-                            aria-label={`View original photo of ${row.filename}`}
-                            aria-pressed={sourceView?.id === row.id}
-                            title="View original photo"
-                            disabled={sourceLoadingId === row.id}
-                            onClick={() => void handleViewSource(row)}
-                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
-                          >
-                            {sourceLoadingId === row.id
-                              ? <Spinner className="h-4 w-4" />
-                              : <ImageIcon className="h-4 w-4" strokeWidth={1.9} />}
-                          </button>
-                        )}
-                        {(row.status === 'committed' || row.row_count > 0) && (
-                          <button
-                            type="button"
-                            aria-label={`Show entries from ${row.filename}`}
-                            aria-pressed={entriesUpload?.id === row.id}
-                            title="Show the entries this import wrote"
-                            onClick={() => toggleEntries(row)}
-                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          >
-                            <ListIcon className="h-4 w-4" strokeWidth={1.9} />
-                          </button>
-                        )}
-                        {row.status !== 'committed' && (
-                          <button
-                            type="button"
-                            aria-label={`Re-upload ${row.filename}`}
-                            title={row.has_source
-                              ? 'Read the stored original again'
-                              : 'Nothing stored — choose the file again'}
-                            disabled={retryingId === row.id}
-                            onClick={() => void handleRetry(row)}
-                            className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
-                          >
-                            {retryingId === row.id
-                              ? <Spinner className="h-4 w-4" />
-                              : <RotateCcwIcon className="h-4 w-4" strokeWidth={1.9} />}
-                          </button>
-                        )}
+      {uploadsLoading && !hasLoadedOnce ? (
+        <div className="mt-4 flex items-center justify-center gap-2.5 py-8">
+          <Spinner className="h-5 w-5" />
+          <span className="text-body-xs font-medium text-slate-600">Loading uploads…</span>
+        </div>
+      ) : uploadsError ? (
+        <div className="mt-4">
+          <EmptyState
+            size="sm"
+            variant={uploadsError.offline ? 'offline' : 'error'}
+            title={uploadsError.offline ? 'Backend offline' : 'Failed to load uploads'}
+            description={uploadsError.message + (uploadsError.reference ? ` (ref ${uploadsError.reference})` : '')}
+            hints={uploadsError.offline ? ['Backend unreachable. Data saved locally will sync when online.'] : uploadsError.reference ? [`Reference ${uploadsError.reference}`] : undefined}
+            action={{ label: 'Retry', onClick: () => fetchUploads(currentCursor) }}
+          />
+        </div>
+      ) : uploads.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState
+            size="md"
+            variant="empty"
+            title="No imports yet"
+            description="Your staged files and image jobs will appear here"
+            hints={['Upload a CSV or image to get started', 'Manual entries appear after you save them']}
+            action={{ label: 'Upload a spreadsheet', onClick: () => setActiveTabId('excel') }}
+            secondaryAction={{ label: 'Add a row by hand', onClick: () => setActiveTabId('manual') }}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="relative mt-4">
+            {uploadsRefreshing && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/70 backdrop-blur-[1px]">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-meta font-medium text-slate-700 shadow-sm ring-1 ring-slate-200">
+                  <Spinner className="h-4 w-4" />
+                  Refreshing…
+                </span>
+              </div>
+            )}
+            <div className={uploadsRefreshing ? 'opacity-60' : ''}>
+              <ResponsiveTable<any>
+              caption="Your uploads"
+              minWidth="min-w-[520px]"
+              /* Ten rows a page is still taller than the panels around it,
+                 so the box is capped and its header pinned. */
+              maxHeight="max-h-[420px]"
+              rows={uploads}
+              rowKey={(row:any)=>String(row.id)}
+              columns={[
+                { key:'file', label:'File', primary:true, render:(row:any)=> <span className="text-body-xs font-medium text-slate-800">{row.filename}</span> },
+                { key:'kind', label:'How it came in', render:(row:any)=> describeKind(row.kind) },
+                { key:'status', label:'Status', render:(row:any)=> <StatusPill tone={statusTone[row.status] ?? 'neutral'} dot>{plainStatus(row.status)}</StatusPill> },
+                { key:'rows', label:'Rows', render:(row:any)=> <><span className="tabular-nums">{row.row_count}</span>{row.error_count > 0 && <span className="ml-1 text-red-600">({row.error_count} need fixing)</span>}</> },
+                { key:'created', label:'Created', render:(row:any)=> row.created_at ? new Date(row.created_at).toLocaleString() : '—' },
+                /* One actions cell rather than three empty-headed columns:
+                   the list already has five labelled columns and each extra
+                   sliver pushed the file name into a scroll. */
+                { key:'actions', label:'', cellClassName:'pr-0', render:(row:any)=> (
+                    <div className="flex items-center justify-end gap-0.5">
+                      {row.has_source && (
                         <button
                           type="button"
-                          aria-label={`Delete ${row.filename}`}
-                          title={row.status === 'committed'
-                            ? 'Delete this import and the entries it wrote'
-                            : 'Discard this upload'}
-                          onClick={() => handleDelete(row.id)}
-                          className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                          aria-label={`View original photo of ${row.filename}`}
+                          aria-pressed={sourceView?.id === row.id}
+                          title="View original photo"
+                          disabled={sourceLoadingId === row.id}
+                          onClick={() => void handleViewSource(row)}
+                          className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
                         >
-                          <TrashIcon className="h-4 w-4" strokeWidth={1.9} />
+                          {sourceLoadingId === row.id
+                            ? <Spinner className="h-4 w-4" />
+                            : <ImageIcon className="h-4 w-4" strokeWidth={1.9} />}
                         </button>
-                      </div>) },
-                ]}
-              />
+                      )}
+                      {(row.status === 'committed' || row.row_count > 0) && (
+                        <button
+                          type="button"
+                          aria-label={`Show entries from ${row.filename}`}
+                          aria-pressed={entriesUpload?.id === row.id}
+                          title="Show the entries this import wrote"
+                          onClick={() => toggleEntries(row)}
+                          className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
+                        >
+                          <ListIcon className="h-4 w-4" strokeWidth={1.9} />
+                        </button>
+                      )}
+                      {row.status !== 'committed' && (
+                        <button
+                          type="button"
+                          aria-label={`Re-upload ${row.filename}`}
+                          title={row.has_source
+                            ? 'Read the stored original again'
+                            : 'Nothing stored — choose the file again'}
+                          disabled={retryingId === row.id}
+                          onClick={() => void handleRetry(row)}
+                          className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700 disabled:opacity-50"
+                        >
+                          {retryingId === row.id
+                            ? <Spinner className="h-4 w-4" />
+                            : <RotateCcwIcon className="h-4 w-4" strokeWidth={1.9} />}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Delete ${row.filename}`}
+                        title={row.status === 'committed'
+                          ? 'Delete this import and the entries it wrote'
+                          : 'Discard this upload'}
+                        onClick={() => handleDelete(row.id)}
+                        className="tap-expand rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-600"
+                      >
+                        <TrashIcon className="h-4 w-4" strokeWidth={1.9} />
+                      </button>
+                    </div>) },
+              ]}
+            />
+          </div>
+          {(hasMore || cursorStack.length > 0) && (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                disabled={cursorStack.length === 0}
+                onClick={handlePrev}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-meta font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                Previous
+              </button>
+              <span className="text-caption text-slate-500">{hasMore ? 'More results available' : 'End of list'}</span>
+              <button
+                type="button"
+                disabled={!hasMore}
+                onClick={handleNext}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-meta font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                Next
+              </button>
             </div>
-            {(hasMore || cursorStack.length > 0) && (
-              <div className="mt-3 flex items-center justify-between gap-2">
+          )}
+          {entriesUpload && (
+            <UploadEntriesPanel
+              upload={entriesUpload}
+              onClose={() => setEntriesUpload(null)}
+              onChanged={() => fetchUploads(currentCursor, { force: true })}
+            />
+          )}
+          {sourceView && (
+            /* The photo is shown here rather than in a new tab so it sits
+               next to the rows it produced: the point of keeping it is to
+               check a doubtful value without leaving the screen. */
+            <figure className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+              <figcaption className="flex items-center justify-between gap-2">
+                <span className="truncate text-caption font-medium text-slate-600">
+                  Original photo · {sourceView.filename}
+                </span>
                 <button
                   type="button"
-                  disabled={cursorStack.length === 0}
-                  onClick={handlePrev}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-meta font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
+                  aria-label="Close original photo"
+                  onClick={closeSource}
+                  className="tap-expand rounded-md p-1 text-slate-500 hover:bg-white hover:text-slate-700"
                 >
-                  Previous
+                  <XIcon className="h-4 w-4" strokeWidth={1.9} />
                 </button>
-                <span className="text-caption text-slate-500">{hasMore ? 'More results available' : 'End of list'}</span>
-                <button
-                  type="button"
-                  disabled={!hasMore}
-                  onClick={handleNext}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-meta font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
-                >
-                  Next
-                </button>
-              </div>
-            )}
-            {entriesUpload && (
-              <UploadEntriesPanel
-                upload={entriesUpload}
-                onClose={() => setEntriesUpload(null)}
-                onChanged={() => fetchUploads(currentCursor, { force: true })}
-              />
-            )}
-            {sourceView && (
-              /* The photo is shown here rather than in a new tab so it sits
-                 next to the rows it produced: the point of keeping it is to
-                 check a doubtful value without leaving the screen. */
-              <figure className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                <figcaption className="flex items-center justify-between gap-2">
-                  <span className="truncate text-caption font-medium text-slate-600">
-                    Original photo · {sourceView.filename}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Close original photo"
-                    onClick={closeSource}
-                    className="tap-expand rounded-md p-1 text-slate-500 hover:bg-white hover:text-slate-700"
-                  >
-                    <XIcon className="h-4 w-4" strokeWidth={1.9} />
-                  </button>
-                </figcaption>
-                <a
-                  href={sourceView.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={`Open ${sourceView.filename} full size`}
-                  className="mt-2 block"
-                >
-                  <img
-                    src={sourceView.url}
-                    alt={`Original photo: ${sourceView.filename}`}
-                    className="mx-auto max-h-[360px] w-auto max-w-full rounded border border-slate-200 bg-white object-contain"
-                  />
-                </a>
-              </figure>
-            )}
-              </div>
-          </>
-        )}
-      </section>
+              </figcaption>
+              <a
+                href={sourceView.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open ${sourceView.filename} full size`}
+                className="mt-2 block"
+              >
+                <img
+                  src={sourceView.url}
+                  alt={`Original photo: ${sourceView.filename}`}
+                  className="mx-auto max-h-[360px] w-auto max-w-full rounded border border-slate-200 bg-white object-contain"
+                />
+              </a>
+            </figure>
+          )}
+          </div>
+        </>
+      )}
+    </section>
+  );
 
+  return (
+    <>
       <SourceTabs activeTabId={activeTabId} onSelect={setActiveTabId} />
 
       <div
@@ -614,6 +619,8 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
           <PosMomoTab onRouteToSpreadsheet={() => setActiveTabId('excel')} />
         )}
       </div>
+
+      {recentUploads}
 
       <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-slate-500 md:hidden">
         <LockIcon className="h-3.5 w-3.5 text-slate-500" strokeWidth={1.75} />

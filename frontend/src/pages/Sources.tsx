@@ -18,7 +18,14 @@ import { api, ApiException } from '../api/client';
 import { fetchSchedule, jobLabel, nextRunLabel, runStatusTone } from '../lib/schedule';
 import type { ScheduleRow } from '../lib/schedule';
 import { plainStatus } from '../lib/plainLanguage';
-import { SOURCE_STATUS_TONE, isSyncable, kindLabel, kindOf, stateOf } from '../lib/sourceChannels';
+import {
+  SOURCE_STATUS_TONE,
+  isSyncable,
+  kindLabel,
+  kindOf,
+  stateOf,
+  syncBlockedReason,
+} from '../lib/sourceChannels';
 
 interface SourcesProps { onNavigate: (id:string)=>void; }
 
@@ -56,6 +63,7 @@ const kindIcon: Record<string, any> = {
   ocr: ImageIcon,
   api: KeyboardIcon,
   sms: SmartphoneIcon,
+  manual: KeyboardIcon,
 };
 
 // Naming and colour live in `lib/sourceChannels` so this page and the ingestion
@@ -149,7 +157,7 @@ export function Sources({ onNavigate }: SourcesProps) {
         {/* Only an active channel is syncable: the API answers 409 not_active
             for anything else, so the button is disabled with the reason rather
             than letting the request fail. */}
-        <button type="button" aria-label={`Sync ${s.name}`} disabled={!isSyncable(s)} title={isSyncable(s) ? undefined : 'Only an active channel can be pulled — an administrator activates it on Connectors'} onClick={()=>void sync(s.id, s.name)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"><RefreshCwIcon className={['h-4 w-4', syncingId===s.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
+        <button type="button" aria-label={`Sync ${s.name}`} disabled={!isSyncable(s)} title={syncBlockedReason(s)} onClick={()=>void sync(s.id, s.name)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"><RefreshCwIcon className={['h-4 w-4', syncingId===s.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
         <button type="button" aria-label={`View details for ${s.name}`} title="View details" onClick={()=>openDetail(s)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><SettingsIcon className="h-4 w-4" strokeWidth={1.9} /></button>
       </span>
     ) },
@@ -240,7 +248,9 @@ export function Sources({ onNavigate }: SourcesProps) {
                       <span className="min-w-0 flex-1 truncate text-meta font-semibold text-slate-900">{source.name}</span>
                       <StatusPill tone={statusTone[st] ?? 'neutral'} dot>{st}</StatusPill>
                       <span className="hidden shrink-0 text-fine text-slate-500 sm:block">{source.last_sync_at ? new Date(source.last_sync_at).toLocaleString() : '—'}</span>
-                      <button type="button" aria-label={`Sync ${source.name}`} onClick={()=>void sync(source.id, source.name)} className="tap-expand shrink-0 rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><RefreshCwIcon className={['h-4 w-4', syncingId===source.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
+                      {/* An import channel has nothing to pull, so the control is disabled
+                          here as it is in the table — the reason is on the button. */}
+                      <button type="button" aria-label={`Sync ${source.name}`} disabled={!isSyncable(source)} title={syncBlockedReason(source)} onClick={()=>void sync(source.id, source.name)} className="tap-expand shrink-0 rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"><RefreshCwIcon className={['h-4 w-4', syncingId===source.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
                       <button type="button" aria-label={`View details for ${source.name}`} title="View details" onClick={()=>openDetail(source)} className="tap-expand shrink-0 rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><SettingsIcon className="h-4 w-4" strokeWidth={1.9} /></button>
                     </li>
                   );
@@ -267,7 +277,7 @@ export function Sources({ onNavigate }: SourcesProps) {
                       <div className="hidden w-[150px] shrink-0 md:block"><p className="text-fine text-slate-500">Last pull</p><p className="truncate text-meta font-medium text-slate-700" title={source.last_pull?.detail ?? undefined}>{lastPullLabel(source)}</p></div>
                       <StatusPill tone={statusTone[st] ?? 'neutral'} dot>{st}</StatusPill>
                       <div className="flex shrink-0 items-center gap-1">
-                        <button type="button" aria-label={`Sync ${source.name}`} onClick={()=>void sync(source.id, source.name)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><RefreshCwIcon className={['h-4 w-4', syncingId===source.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
+                        <button type="button" aria-label={`Sync ${source.name}`} disabled={!isSyncable(source)} title={syncBlockedReason(source)} onClick={()=>void sync(source.id, source.name)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"><RefreshCwIcon className={['h-4 w-4', syncingId===source.id?'animate-spin text-brand-600':''].join(' ')} strokeWidth={1.9} /></button>
                         <button type="button" aria-label={`View details for ${source.name}`} title="View details" onClick={()=>openDetail(source)} className="tap-expand rounded-md p-1.5 text-slate-500 transition-colors duration-150 ease-out hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"><SettingsIcon className="h-4 w-4" strokeWidth={1.9} /></button>
                       </div>
                     </li>);
@@ -279,7 +289,7 @@ export function Sources({ onNavigate }: SourcesProps) {
 
           <Panel title="Sync history" description="Recent ingestion runs.">
             {history.length===0 ? (
-              <EmptyState variant="empty" size="sm" title="No sync history" description="Sync runs appear here after your first import or connector sync." hints={["Import a file, or connect a source"]} action={{label:'Import demand data', onClick:()=>onNavigate('ingestion')}} />
+              <EmptyState variant="empty" size="sm" title="No sync history" description="Connector syncs appear here. Uploads and manual entries are listed above as channels instead." hints={["Connect a POS or mobile money provider","Import a file to fill a channel"]} action={{label:'Import demand data', onClick:()=>onNavigate('ingestion')}} />
             ) : (
               <ResponsiveTable<any>
                 caption="Sync history"

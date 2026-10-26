@@ -24,6 +24,8 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 ]);
 const SUPPORTED_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 const HEIC_EXTENSIONS = /\.(heic|heif)$/i;
+const CURRENT_YEAR = new Date().getFullYear();
+const EARLIEST_YEAR = 2000;
 const HEIC_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence']);
 
 /** HEIC/HEIF is sniffed by the backend but Pillow cannot decode it without a plugin. */
@@ -42,6 +44,12 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   const [error, setError] = useState<{ message: string; reference?: string | null; offline?: boolean } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  /**
+   * The year this page belongs to, for dates written without one ("12 Oct").
+   * The server defaults to the current year, which quietly misfiles an archive
+   * page as this year's demand, so the operator states it here.
+   */
+  const [reportingYear, setReportingYear] = useState(String(CURRENT_YEAR));
 
   const clearPreview = () => {
     setPreviewUrl((prev) => {
@@ -80,6 +88,12 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
     try {
       const form = new FormData();
       form.append('file', file);
+      const year = Number(reportingYear);
+      // Only sent when it is a real year, so a cleared field falls back to the
+      // server's default instead of posting an invalid one.
+      if (Number.isInteger(year) && year >= EARLIEST_YEAR) {
+        form.append('reporting_year', String(year));
+      }
       const res = await api.postForm<{ job_id: string; status: string; filename: string }>('/api/v1/ingest/image', form);
       onUploaded(res.job_id, file.name);
       /* No row count is claimed here on purpose. `POST /ingest/image` returns
@@ -178,6 +192,22 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
             void handleFile(file);
           }}
         />
+        <label
+          htmlFor="image-reporting-year"
+          className="mt-4 flex flex-wrap items-center justify-center gap-2 text-body-xs text-slate-600"
+        >
+          <span className="font-medium text-slate-700">Year for dates without one</span>
+          <input
+            id="image-reporting-year"
+            type="number"
+            inputMode="numeric"
+            min={EARLIEST_YEAR}
+            max={CURRENT_YEAR}
+            value={reportingYear}
+            onChange={(event) => setReportingYear(event.target.value)}
+            className="w-24 rounded-md border border-slate-300 px-2 py-1 text-body-xs tabular-nums text-slate-800 focus:border-brand-500 focus:outline-none"
+          />
+        </label>
         <button
           type="button"
           onClick={() => fileInput.current?.click()}
@@ -225,7 +255,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
       <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-3.5 py-3">
         <LightbulbIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand-600" strokeWidth={1.75} />
         <p className="text-body-sm leading-relaxed text-slate-700">
-          <span className="font-semibold">Tip:</span> Ensure the handwriting is clear and the date and visitor count are legible. Dates can be YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. An unambiguous date such as 12/31 sets the order for the whole photo; otherwise ambiguous numeric dates are day-first. iPhone HEIC/HEIF photos must be converted to JPG first.
+          <span className="font-semibold">Tip:</span> Ensure the handwriting is clear and the date and visitor count are legible. Dates can be YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY, and one written without a year uses the year above. An unambiguous date such as 12/31 sets the order for the whole photo; otherwise ambiguous numeric dates are day-first. iPhone HEIC/HEIF photos must be converted to JPG first.
         </p>
       </div>
     </section>

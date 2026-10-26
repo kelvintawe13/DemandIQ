@@ -22,8 +22,7 @@ import {
   SlidersHorizontalIcon,
   TargetIcon,
   SparklesIcon,
-  CpuIcon,
-  MonitorIcon } from
+  CpuIcon } from
 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -75,9 +74,6 @@ export function roleLabel(raw: string): AppRole {
   const found = ALL_ROLES.find((label) => ROLE_KEY_BY_LABEL[label] === raw.toLowerCase());
   return found ?? 'Viewer';
 }
-
-/** Roles that run the business rather than the models. */
-const GOVERNANCE_ROLES: AppRole[] = ['Owner', 'Administrator'];
 
 /**
  * First screen after sign-in, per role: each role lands on the work it owns.
@@ -149,7 +145,12 @@ export function navRootFor(navId: string): string {
 }
 
 export function canAccess(role: string, navId: string, isSiteAdmin = false): boolean {
-  if (navId === 'admin-site') return isSiteAdmin;
+  // The platform flag opens the console, but the role still has to be one that
+  // holds it: a site-admin flag must not put an administrator's screen in front
+  // of an owner whose sidebar is the business workspace.
+  if (navId === 'admin-site') {
+    return isSiteAdmin && itemsForRole(role, true).some((item) => item.id === navId);
+  }
   const items = itemsForRole(role, isSiteAdmin);
   if (items.some((item) => item.id === navId)) return true;
   const parent = SUB_ROUTE_PARENT[navId];
@@ -230,13 +231,13 @@ export const navSections: NavSection[] = [
     roles: [...WORKSPACE_ROLES]
   },
   {
-    // Workspace settings for the hands-on roles; owners and administrators
-    // get the governance copy below instead, so 'settings' never renders twice.
+    // Workspace settings for the business and hands-on roles; the administrator
+    // gets the governance copy below instead, so 'settings' never renders twice.
     id: 'settings',
     label: 'Settings',
     labelKey: 'nav.settings',
     icon: SettingsIcon,
-    roles: ['Analyst', 'Data Clerk']
+    roles: ['Owner', 'Analyst', 'Data Clerk']
   }]
 
 },
@@ -280,8 +281,8 @@ export const navSections: NavSection[] = [
     label: 'Policy Lab',
     labelKey: 'nav.policies',
     icon: SlidersHorizontalIcon,
-    // A planning decision, so the owner and the analyst simulate here too.
-    roles: ['Owner', 'Administrator', 'Analyst']
+    // A planning decision the analyst and the administrator simulate here.
+    roles: ['Administrator', 'Analyst']
   },
   {
     id: 'admin-explainer',
@@ -301,7 +302,7 @@ export const navSections: NavSection[] = [
     label: 'Locations & Menu',
     labelKey: 'nav.locations',
     icon: MapPinIcon,
-    roles: ['Owner', 'Administrator']
+    roles: ['Administrator']
   },
   {
     // Enrolment, credential rotation, quarantine and health for the till/POS
@@ -311,7 +312,7 @@ export const navSections: NavSection[] = [
     label: 'Device Fleet',
     labelKey: 'nav.deviceFleet',
     icon: CpuIcon,
-    roles: ['Owner', 'Administrator']
+    roles: ['Administrator']
   },
   {
     id: 'admin-webhooks',
@@ -352,7 +353,8 @@ export const navSections: NavSection[] = [
     label: 'Site Admin',
     labelKey: 'nav.siteAdmin',
     icon: ShieldAlertIcon,
-    roles: ['Owner', 'Administrator']
+    // Platform console: an administrator's screen, still flag-gated on top.
+    roles: ['Administrator']
   },
   {
     id: 'admin-datasets',
@@ -366,33 +368,27 @@ export const navSections: NavSection[] = [
     label: 'Approvals',
     labelKey: 'nav.approvals',
     icon: GitPullRequestIcon,
-    roles: ['Owner', 'Administrator']
+    roles: ['Administrator']
   },
-  {
-    // Approving a consent-gated remote view of a customer's live screen. An
-    // administrator may *request* one but never approve it — the backend enforces
-    // `device_mirror:approve` as an owner-only capability, and the owner is the
-    // second pair of eyes the two-person rule is built on. It is governance, so
-    // it is filed with governance rather than with the fleet it watches.
-    id: 'mirror-approvals',
-    label: 'Remote Support',
-    labelKey: 'nav.mirrorApprovals',
-    icon: MonitorIcon,
-    roles: ['Owner']
-  },
+  // `mirror-approvals` (Remote Support) is deliberately absent. Approving a
+  // consent-gated remote view is an owner-only capability
+  // (`device_mirror:approve`), and the owner's sidebar is now the business
+  // workspace only — so listing it here would either show an administrator a
+  // screen whose action the API refuses, or put a console route back in front
+  // of the owner. The page and its API remain; it has no menu entry.
   {
     id: 'admin-access',
     label: 'Access Control',
     labelKey: 'nav.access',
     icon: ShieldCheckIcon,
-    roles: ['Owner', 'Administrator']
+    roles: ['Administrator']
   },
   {
     id: 'settings',
     label: 'Settings',
     labelKey: 'nav.settings',
     icon: SettingsIcon,
-    roles: GOVERNANCE_ROLES
+    roles: ['Administrator']
   }]
 
 }];

@@ -49,23 +49,38 @@ describe('role navigation', () => {
     }
   });
 
-  it('lets the owner plan and govern without training models', () => {
+  it('keeps the owner on the business screens and out of every admin console', () => {
     const ids = idsFor('Owner');
-    // Planning and governance are theirs.
-    expect(ids).toContain('admin-policies');
-    expect(ids).toContain('admin-approvals');
-    expect(ids).toContain('admin-access');
-    expect(ids).toContain('admin-locations');
-    expect(ids).toContain('settings');
-    // The model and integration console is not.
-    expect(ids).not.toContain('admin-models');
-    expect(ids).not.toContain('admin-accuracy');
-    expect(ids).not.toContain('admin-experiments');
-    expect(ids).not.toContain('admin-connectors');
-    expect(ids).not.toContain('admin-webhooks');
-    expect(ids).not.toContain('admin-pipeline');
-    expect(ids).not.toContain('admin-ai');
-    expect(ids).not.toContain('admin-datasets');
+    // The owner runs the restaurant, not the platform: the business workspace
+    // and its own settings, and nothing from the console groups.
+    expect(ids.sort()).toEqual([
+      'alerts',
+      'analytics',
+      'forecast',
+      'ingestion',
+      'overview',
+      'quality',
+      'reports',
+      'settings',
+      'sources',
+    ]);
+    for (const id of [
+      'admin-models',
+      'admin-accuracy',
+      'admin-experiments',
+      'admin-features',
+      'admin-policies',
+      'admin-explainer',
+      'admin-locations',
+      'device-fleet',
+      'admin-approvals',
+      'admin-access',
+      'admin-site',
+      'admin-datasets',
+      'mirror-approvals',
+    ]) {
+      expect(canAccess('Owner', id)).toBe(false);
+    }
   });
 
   it('lets the data clerk enter and clean data and nothing more', () => {
@@ -117,17 +132,25 @@ describe('role navigation', () => {
   it('groups the navigation by role, not by an is-admin flag', () => {
     expect(labels('Viewer')).toEqual(['nav.group.insights']);
     expect(labels('Data Clerk')).toEqual(['nav.group.insights', 'nav.group.data', 'nav.group.system']);
-    // Governance only for the roles that run the workspace.
+    // The console groups belong to the administrator; the owner is a business
+    // role, so its sidebar is the workspace groups only.
     expect(labels('Analyst')).not.toContain('nav.group.governance');
-    expect(labels('Owner')).toContain('nav.group.governance');
+    expect(labels('Owner')).toEqual([
+      'nav.group.insights',
+      'nav.group.data',
+      'nav.group.system',
+    ]);
     expect(labels('Administrator')).toContain('nav.group.governance');
   });
 
   it('gates the Site Admin console on the platform flag, not the role', () => {
-    expect(canAccess('Owner', 'admin-site')).toBe(false);
-    expect(canAccess('Owner', 'admin-site', true)).toBe(true);
+    // The flag is necessary but not sufficient: the console is an
+    // administrator's screen, so the owner never sees it even as a site admin.
+    expect(canAccess('Administrator', 'admin-site')).toBe(false);
     expect(canAccess('Administrator', 'admin-site', true)).toBe(true);
-    expect(idsFor('Owner', true)).toContain('admin-site');
-    expect(idsFor('Owner', false)).not.toContain('admin-site');
+    expect(canAccess('Owner', 'admin-site', true)).toBe(false);
+    expect(idsFor('Administrator', true)).toContain('admin-site');
+    expect(idsFor('Administrator', false)).not.toContain('admin-site');
+    expect(idsFor('Owner', true)).not.toContain('admin-site');
   });
 });

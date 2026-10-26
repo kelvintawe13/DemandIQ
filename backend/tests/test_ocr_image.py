@@ -99,6 +99,194 @@ def test_a_box_maps_back_onto_the_photo_the_operator_sees() -> None:
     assert abs(box[1] * 180 + box[3] * 90 - 140) < 10
 
 
+def test_visual_rows_rejoin_a_column_wise_read() -> None:
+    """A sheet read as two columns must still pair each date with its count.
+
+    Tesseract often returns every date in one block and every count in another.
+    A parser that trusts the engine's lines then sees lines with only one field
+    and imports nothing at all, so rows are grouped by vertical position instead.
+    """
+    from app.services.ingestion.image import _visual_rows, _Word
+
+    words = [
+        _Word(text="12/01/2026", start=0, end=10, box=(40, 40, 100, 20)),
+        _Word(text="13/01/2026", start=0, end=10, box=(40, 100, 100, 20)),
+        _Word(text="112", start=0, end=3, box=(300, 42, 40, 20)),
+        _Word(text="87", start=0, end=2, box=(300, 102, 30, 20)),
+    ]
+
+    rows = _visual_rows(words)
+    assert [[word.text for word in row] for row in rows] == [
+        ["12/01/2026", "112"],
+        ["13/01/2026", "87"],
+    ]
+
+
+def test_visual_rows_follow_a_slanted_page() -> None:
+    """A row that drifts down to the right is still one row.
+
+    Deskew straightens the page, but handwriting wanders and a photo can stay a
+    degree or two off. On a wide sheet that puts the count column almost a line
+    below its date; grouping without following the drift splits every row in two
+    and recovers nothing.
+    """
+    from app.services.ingestion.image import _visual_rows, _Word
+
+    slope = 0.08
+    words = []
+    for index, (date_text, count_text) in enumerate([("12/01/2026", "112"), ("13/01/2026", "87")]):
+        base = 40 + index * 60
+        words.append(
+            _Word(text=date_text, start=0, end=10, box=(40, int(base + slope * 150), 100, 20))
+        )
+        words.append(
+            _Word(text=count_text, start=0, end=3, box=(300, int(base + slope * 380), 40, 20))
+        )
+
+    # Without the drift correction these four words land in four bands.
+    rows = _visual_rows(words)
+    assert [[word.text for word in row] for row in rows] == [
+        ["12/01/2026", "112"],
+        ["13/01/2026", "87"],
+    ]
+
+
+def test_visual_rows_separate_rows_written_close_together() -> None:
+    # 24 px between rows with 20 px glyphs: they do not overlap, so a loose
+    # tolerance would pair day 12's count with day 13's date.
+    from app.services.ingestion.image import _visual_rows, _Word
+
+    words = [
+        _Word(text="12/01/2026", start=0, end=10, box=(40, 40, 100, 20)),
+        _Word(text="112", start=0, end=3, box=(300, 41, 40, 20)),
+        _Word(text="13/01/2026", start=0, end=10, box=(40, 64, 100, 20)),
+        _Word(text="87", start=0, end=2, box=(300, 66, 30, 20)),
+    ]
+
+    rows = _visual_rows(words)
+    assert [[word.text for word in row] for row in rows] == [
+        ["12/01/2026", "112"],
+        ["13/01/2026", "87"],
+    ]
+
+
+def test_visual_rows_do_not_merge_a_neighbouring_line() -> None:
+    # The rows above and below are two line-heights apart; a loose tolerance that
+    # pulled them together would pair a date with the wrong day's count.
+    from app.services.ingestion.image import _visual_rows, _Word
+
+    words = [
+        _Word(text="12/01/2026", start=0, end=10, box=(40, 40, 100, 20)),
+        _Word(text="112", start=0, end=3, box=(300, 40, 40, 20)),
+        _Word(text="13/01/2026", start=0, end=10, box=(40, 80, 100, 20)),
+        _Word(text="87", start=0, end=2, box=(300, 80, 30, 20)),
+    ]
+
+    assert len(_visual_rows(words)) == 2
+
+
+def test_a_column_wise_read_is_recovered_as_rows(monkeypatch) -> None:
+    """The layout path, wired through the engine, on a page read column by column.
+
+    `image_to_string` returns the two columns one after the other — the case that
+    used to produce no rows — while `image_to_data` still knows where each word
+    sits. The extraction must come back as pairs, with the geometry attached.
+    """
+    pytest.importorskip("PIL")
+    pytesseract = pytest.importorskip("pytesseract")
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (200, 120), "white").save(buffer, format="PNG")
+
+    monkeypatch.setattr(
+        pytesseract,
+        "image_to_string",
+        lambda *a, **k: "12/01/2026\n13/01/2026\n112\n87\n",
+    )
+
+    words = [
+        ("12/01/2026", (40, 40, 100, 20)),
+        ("13/01/2026", (40, 100, 100, 20)),
+        ("112", (300, 42, 40, 20)),
+        ("87", (300, 102, 30, 20)),
+    ]
+    blocks = {
+        "level": [5] * len(words),
+        "block_num": [0] * len(words),
+        "par_num": [0] * len(words),
+        # One engine line per column: the read that defeats a line-based parser.
+        "line_num": [0, 1, 2, 3],
+        "conf": ["95"] * len(words),
+        "text": [word for word, _ in words],
+        "left": [box[0] for _, box in words],
+        "top": [box[1] for _, box in words],
+        "width": [box[2] for _, box in words],
+        "height": [box[3] for _, box in words],
+    }
+    monkeypatch.setattr(pytesseract, "image_to_data", lambda *a, **k: blocks)
+    monkeypatch.setattr("app.services.ingestion.image._page_segmentation_modes", lambda: [6])
+
+    extraction = _tesseract_extraction(buffer.getvalue(), "eng")
+
+    assert [(row["date"], row["demand_qty"]) for row in extraction.rows] == [
+        ("2026-01-12", 112),
+        ("2026-01-13", 87),
+    ]
+    assert extraction.quality["row_source"] == "cells"
+    assert extraction.rows[0]["boxes"]["demand_qty"] is not None
+
+
+def test_row_confidence_is_the_parsers_reading_not_the_engines_score(monkeypatch) -> None:
+    """Two different numbers, kept apart on purpose.
+
+    A row's `confidence` says how ambiguous the *line* was: 0.75 means several
+    numbers were candidates and the nearest to the date was chosen. Tesseract's
+    word confidence says how sure the recognizer was of the glyphs. Neither is a
+    probability that the record is correct, so mixing them — or presenting one as
+    the other — would misrepresent both. This pins them as separate fields.
+    """
+    pytest.importorskip("PIL")
+    pytesseract = pytest.importorskip("pytesseract")
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (200, 120), "white").save(buffer, format="PNG")
+
+    monkeypatch.setattr(pytesseract, "image_to_string", lambda *a, **k: "12/01/2026   112   6\n")
+    words = [
+        ("12/01/2026", (40, 40, 100, 20)),
+        ("112", (200, 40, 40, 20)),
+        ("6", (260, 40, 20, 20)),
+    ]
+    blocks = {
+        "level": [5] * len(words),
+        "block_num": [0] * len(words),
+        "par_num": [0] * len(words),
+        "line_num": [0] * len(words),
+        "conf": ["99"] * len(words),
+        "text": [word for word, _ in words],
+        "left": [box[0] for _, box in words],
+        "top": [box[1] for _, box in words],
+        "width": [box[2] for _, box in words],
+        "height": [box[3] for _, box in words],
+    }
+    monkeypatch.setattr(pytesseract, "image_to_data", lambda *a, **k: blocks)
+    monkeypatch.setattr("app.services.ingestion.image._page_segmentation_modes", lambda: [6])
+
+    extraction = _tesseract_extraction(buffer.getvalue(), "eng")
+
+    row = extraction.rows[0]
+    assert row["demand_qty"] == 112
+    # The line was ambiguous (112 or 6), whatever the recognizer thought of it.
+    assert row["confidence"] == 0.75
+    # The engine's own score lives in quality, never in the row.
+    assert extraction.quality["mean_confidence"] == 0.99
+    assert row["confidence"] != extraction.quality["mean_confidence"]
+
+
 def test_real_tesseract_reads_a_rendered_log() -> None:
     """The local path must be exercised, not only monkeypatched.
 
@@ -134,6 +322,9 @@ def test_real_tesseract_reads_a_rendered_log() -> None:
     assert extraction.rows, "the rendered log produced no OCR rows"
     assert any(row["demand_qty"] in (112, 87) for row in extraction.rows)
     assert extraction.quality.get("page_segmentation_mode") in _page_segmentation_modes()
+    # This page reads as normal rows, so the layout reconstruction must not take
+    # over: it is a fallback for pages the lines cannot carry, not a replacement.
+    assert extraction.quality.get("row_source") == "lines"
 
     # The review screen highlights each value on the photo, so a row has to
     # carry where it was read. Fractions of the upload, in reading order: the

@@ -25,7 +25,51 @@ export const kindLabel = (raw: string): string =>
         ? 'Spreadsheet'
         : raw === 'ocr'
           ? 'Image OCR'
-          : raw;
+          : raw === 'manual'
+            ? 'Manual entry'
+            : raw;
+
+/**
+ * The import kind behind a channel, when ingestion registered it.
+ *
+ * `GET /sources` reports `import_kind` for the channels the ingestion service
+ * creates itself (uploads, photos, hand entry, till pushes) and `null` for a
+ * connector an administrator configured. Those two are not interchangeable: one
+ * receives data and has nothing to pull, the other is pulled.
+ */
+export const importKindOf = (source: unknown): string | null => {
+  const kind = (source as { import_kind?: unknown } | null)?.import_kind;
+  return typeof kind === 'string' && kind ? kind : null;
+};
+
+/** The import kind in words, for the control that cannot sync it. */
+export const importKindLabel = (kind: string): string =>
+  kind === 'file'
+    ? 'spreadsheet uploads'
+    : kind === 'image'
+      ? 'photo uploads'
+      : kind === 'manual'
+        ? 'manual entry'
+        : kind === 'device'
+          ? 'till pushes'
+          : kind;
+
+/**
+ * Why a channel cannot be pulled, or `undefined` when it can.
+ *
+ * The reason is the channel's, not the UI's. An import channel is filled by
+ * uploads and pushes, so "an administrator activates it on Connectors" — the
+ * wording for a connector nobody has configured — would be advice that cannot
+ * make the button work.
+ */
+export const syncBlockedReason = (source: unknown): string | undefined => {
+  if (isSyncable(source)) return undefined;
+  const kind = importKindOf(source);
+  if (kind) return `Filled by ${importKindLabel(kind)} — there is nothing to pull`;
+  return stateOf(source).toLowerCase() === 'active'
+    ? undefined
+    : 'Only an active channel can be pulled — an administrator activates it on Connectors';
+};
 
 /**
  * A source's health in one word, for filtering and the status pill.

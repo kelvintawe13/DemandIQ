@@ -17,6 +17,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -36,6 +37,7 @@ from app.models.location import DemandObservation, IngestUpload, Location
 from app.models.location_access import LocationAccessLog
 from app.models.user import User
 from app.security.permissions import INGEST_WRITE, has_capability
+from app.services.ingestion.channels import channel_for_source, record_import
 from app.services.ingestion.file import (
     apply_column_map,
     parse_file_table,
@@ -282,6 +284,9 @@ def ingest_manual(
     committed = 0
     reconciled = 0
     errors: list[dict[str, Any]] = []
+    # Rows entered by hand belong to a channel too: without one the series they
+    # build is unattributable, and Sources has nothing to list for it.
+    channel = channel_for_source(db, current_user.workspace_id, "manual")
 
     for idx, row in enumerate(payload):
         try:
@@ -292,6 +297,7 @@ def ingest_manual(
                 date=row.date,
                 demand_qty=row.demand_qty,
                 source="manual",
+                source_id=channel.id if channel is not None else None,
                 notes=row.notes,
             )
             if result.created:
@@ -328,6 +334,18 @@ def ingest_manual(
                     "details": errors,
                 }
             },
+        )
+
+    if channel is not None:
+        record_import(
+            db,
+            channel,
+            committed=committed,
+            updated=reconciled,
+            detail=(
+                f"{committed} new, {reconciled} corrected from "
+                f"{len(payload)} hand-entered row{'' if len(payload) == 1 else 's'}"
+            ),
         )
 
     return {"committed": committed, "reconciled": reconciled, "total": len(payload)}
@@ -572,6 +590,9 @@ def file_commit(
     reconciled = 0
     row_errors: list[dict[str, Any]] = []
     location_pool = _location_candidates(db, current_user.workspace_id)
+    # The spreadsheet is a channel: rows it lands are attributed to it, so the
+    # Sources screen lists where the demand actually came from.
+    channel = channel_for_source(db, current_user.workspace_id, "file")
 
     for m in mapped:
         raw_loc = m.get("location")
@@ -600,6 +621,7 @@ def file_commit(
                 date=m["date"],
                 demand_qty=m["demand_qty"],
                 source="file",
+                source_id=channel.id if channel is not None else None,
                 upload_id=upload.id,
                 notes=m.get("notes"),
             )
@@ -657,6 +679,16 @@ def file_commit(
     upload.error_count = len(all_errors)
     db.flush()
 
+    if channel is not None:
+        record_import(
+            db,
+            channel,
+            committed=committed,
+            updated=reconciled,
+            skipped=len(skipped) + len(all_errors),
+            detail=f"{upload.filename}: {committed} new, {reconciled} corrected",
+        )
+
     return {
         "upload_id": str(upload.id),
         "committed": committed,
@@ -681,8 +713,15 @@ async def upload_image(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     file: Annotated[UploadFile, File(description="Handwritten log image")],
+    reporting_year: Annotated[int | None, Form(ge=2000, le=2100)] = None,
 ) -> dict[str, Any]:
-    """Run OCR on an uploaded image and stage reviewable rows."""
+    """Run OCR on an uploaded image and stage reviewable rows.
+
+    ``reporting_year`` is the year the operator says the page belongs to, used
+    only for dates written without one ("12 Oct"). Without it those rows would
+    be dated in the current year, which turns last year's page into this year's
+    demand and cannot be told apart from a real reading afterwards.
+    """
     if not file.filename:
         raise _error(400, "validation_error", "Filename is required", field="file")
 
@@ -703,7 +742,9 @@ async def upload_image(
     # OCR is CPU-bound (three Tesseract passes plus geometry) or a slow remote
     # call, and this handler is `async`: running it inline would freeze the
     # event loop — and every other request on the worker — for the whole read.
-    preview = await run_in_threadpool(preview_for_image, data, file.filename)
+    preview = await run_in_threadpool(
+        preview_for_image, data, file.filename, reporting_year=reporting_year
+    )
 
     upload = IngestUpload(
         id=uuid.uuid4(),
@@ -765,6 +806,9 @@ def get_image_job(
         # (location, date). The screen raises these before the import instead of
         # letting one row silently overwrite the other.
         "warnings": preview.get("warnings", []),
+        # The year the operator stated for yearless dates, so the review screen
+        # can show what the rows were read as. Null when it was not stated.
+        "reporting_year": preview.get("reporting_year"),
         "note": preview.get("note"),
     }
 
@@ -792,6 +836,9 @@ def commit_image_job(
     committed = 0
     reconciled = 0
     errors: list[dict[str, Any]] = []
+    # Confirmed photo rows are attributed to the photo channel, so a workspace
+    # that only ever photographs its day book still has a source on Sources.
+    channel = channel_for_source(db, current_user.workspace_id, "image")
 
     for idx, row in enumerate(payload.rows):
         try:
@@ -802,6 +849,7 @@ def commit_image_job(
                 date=row.date,
                 demand_qty=row.demand_qty,
                 source="image",
+                source_id=channel.id if channel is not None else None,
                 upload_id=upload.id,
                 notes=row.notes,
             )
@@ -842,6 +890,15 @@ def commit_image_job(
 
     upload.status = "committed"
     db.flush()
+
+    if channel is not None:
+        record_import(
+            db,
+            channel,
+            committed=committed,
+            updated=reconciled,
+            detail=f"{upload.filename}: {committed} confirmed, {reconciled} corrected",
+        )
 
     return {
         "job_id": str(upload.id),
@@ -1150,7 +1207,10 @@ def retry_upload(
     if upload.source_image is None:
         raise _error(409, "no_source", "The original file was not kept for this upload")
 
-    preview = preview_for_image(upload.source_image, upload.filename)
+    # Re-read under the year the operator chose for this page, not today's: a
+    # retry that silently changed the year would move every yearless row.
+    reporting_year = (upload.preview or {}).get("reporting_year")
+    preview = preview_for_image(upload.source_image, upload.filename, reporting_year=reporting_year)
     # A new dict, not a mutation: a JSONB column is only saved when the value is
     # assigned (the MutableJSONB in-place bug that once dropped column maps).
     upload.preview = preview

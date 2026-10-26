@@ -146,15 +146,28 @@ the reasons in *Photos of a page* — then tries Tesseract's uniform-block, colu
 and sparse page-segmentation modes. The mode is chosen by distinct dates, then
 fewest repeated dates, then plausible counts, then word confidence — not by
 which one returned the most rows, because a mode that splits lines in two can
-always return more. `GET /ingest/image/{job_id}` reports the chosen mode and the
-measured mean word confidence under `quality`, separately from each row's
-line-legibility score.
+always return more. `GET /ingest/image/{job_id}` reports the chosen mode, the
+measured mean word confidence and `row_source` under `quality`, separately from
+each row's line-legibility score. `row_source` is `lines` when the engine's own
+lines carried both fields, or `cells` when the page came back column-by-column
+and the words had to be re-grouped into rows by their position on the page.
 
 The count on a line is the number nearest the date that is neither part of the
 date nor the value of a label (`Table 6`, `tips 3`). Taking the last integer on
 the line, as the parser used to, imported the table number as the visitor count.
 A count of `0` is kept: a restaurant that served nobody has not stopped
 reporting, and the platform stores zero.
+
+A date written without a year (`12 Oct`, `3 Jan`) is read in the **reporting
+year** the operator picks above the upload button, sent as `reporting_year`.
+Left to the server it would default to the current year, which silently files an
+archive page as this year's demand — and the commit cannot tell the difference
+afterwards. The year travels in the preview, so a retry re-reads the photo under
+the same assumption.
+
+Extraction accuracy is measured rather than assumed: `backend/scripts/ocr_accuracy.py`
+scores the real pipeline over verified photos and a reference CSV, and should be
+run before and after any change to the parser, the preprocessing or the engine.
 
 ## OCR row scores (`../../PreviewPanel.tsx`)
 

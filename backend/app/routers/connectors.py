@@ -36,7 +36,9 @@ router = APIRouter(prefix="/api/v1/connectors", tags=["connectors"])
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_TYPES = {"pos", "momo", "file", "ocr", "api", "sms"}
+# ``manual`` is a real channel (hand entry, see app/services/ingestion/channels.py)
+# so it is creatable here too; the enum value arrives in migration 023.
+_ALLOWED_TYPES = {"pos", "momo", "file", "ocr", "api", "sms", "manual"}
 _ALLOWED_STATUS = {"active", "paused", "error", "available"}
 _ALLOWED_CANONICAL = {"location_id", "date", "demand_qty", "notes"}
 

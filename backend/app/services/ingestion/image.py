@@ -116,6 +116,19 @@ _ANNOTATION_LABELS = frozenset(
 # of database imports. ``test_drift_ocr_jobs.py`` asserts the two agree.
 MAX_PLAUSIBLE_DEMAND = 10_000_000
 
+# How much of a word has to sit inside a row's vertical band for the two to
+# belong together. Handwriting is ragged, so a word rarely lines up with its row
+# exactly; but two rows a line apart do not overlap at all, which is what stops
+# this from merging a date with the next day's count.
+_ROW_OVERLAP = 0.5
+
+# Rows drift downwards to the right on a photographed page, and a degree or two
+# of residual tilt is enough to put the count column a line-height below its date.
+# The slope is searched over this range and only used when it clearly sharpens the
+# bands; ±0.15 is about 8.5 degrees.
+_ROW_SLOPE_LIMIT = 0.15
+_ROW_SLOPE_STEP = 0.01
+
 # Pre-processing is deliberately conservative: phone photos are usually large
 # enough but skewed or low-contrast, while a tiny thumbnail is unreadable at any
 # contrast. Upscaling below 800 px on the short edge and normalising contrast is
@@ -508,10 +521,41 @@ def _infer_day_first(text: str) -> bool:
     return day_first_votes >= month_first_votes
 
 
+def _default_year(reporting_year: int | None) -> int:
+    """The year to assume when a date is written without one.
+
+    A handwritten log usually says "12 Oct" and leaves the year to context. Using
+    today's year for that imports last year's page as this year's demand, and
+    nothing downstream can tell the difference — so the operator states the
+    reporting year when they upload, and only a caller that states none falls
+    back to the current year.
+    """
+    return reporting_year or datetime.datetime.now(datetime.UTC).year
+
+
+def _glyph_digits(raw: str) -> int | None:
+    """A day written with letter look-alikes, as an int — or ``None`` if it is not one.
+
+    Tesseract reads a handwritten 1 as ``l``, ``I``, ``|`` or ``L``, which is why a
+    month-first date's day is matched loosely. Upper case matters: the pattern is
+    case-insensitive, so an ``L`` reaches here, and substituting only the lower-case
+    forms raised ``ValueError``. That exception escaped the whole page — a single
+    unreadable glyph in ``Oct L`` returned *no* rows for a photo of twenty-one.
+    Returning ``None`` instead lets the parser try its other date forms.
+    """
+    try:
+        return int(re.sub(r"[lLI|]", "1", raw))
+    except ValueError:
+        return None
+
+
 def _find_date(
-    line: str, *, day_first: bool = True
+    line: str, *, day_first: bool = True, reporting_year: int | None = None
 ) -> tuple[datetime.date | None, tuple[int, int] | None]:
-    """Return the first recognisable date on a line and its character span."""
+    """Return the first recognisable date on a line and its character span.
+
+    ``reporting_year`` is used only for dates the sheet leaves yearless.
+    """
     for pattern, kind in (
         (_ISO_DATE, "iso"),
         (_DMY_DATE, "numeric"),
@@ -541,15 +585,17 @@ def _find_date(
         elif kind == "text":  # day first, e.g. "3 Jan 2026" or "3 Jan"
             month = _MONTHS.get(match.group(2).lower()[:3])
             year_raw = match.group(3)
-            year = int(year_raw) if year_raw else datetime.datetime.now(datetime.UTC).year
+            year = int(year_raw) if year_raw else _default_year(reporting_year)
             date = _safe_date(year, month or 0, match.group(1))
         else:  # month first, e.g. "Oct 1" or "October 12, 2026"
             month = _MONTHS.get(match.group(1).lower()[:3])
             # Tesseract commonly reads a handwritten/printed 1 as l, I or |.
             # That turns "Oct 1" into "Oct l", which is still a date to a human.
-            day = int(re.sub(r"[lI|]", "1", match.group(2)))
+            day = _glyph_digits(match.group(2))
+            if day is None:
+                continue
             year_raw = match.group(3)
-            year = int(year_raw) if year_raw else datetime.datetime.now(datetime.UTC).year
+            year = int(year_raw) if year_raw else _default_year(reporting_year)
             date = _safe_date(year, month or 0, day)
         if date is not None:
             return date, match.span()
@@ -631,7 +677,9 @@ def _count_candidates(
     return candidates
 
 
-def _parse_lines(lines: list[str], *, day_first: bool) -> list[_ParsedRow]:
+def _parse_lines(
+    lines: list[str], *, day_first: bool, reporting_year: int | None = None
+) -> list[_ParsedRow]:
     """The parser proper, keeping the line and spans each row came from.
 
     ``parse_ocr_text`` returns plain dicts; the Tesseract path needs the spans as
@@ -642,7 +690,7 @@ def _parse_lines(lines: list[str], *, day_first: bool) -> list[_ParsedRow]:
         line = raw_line.strip()
         if not line:
             continue
-        date, span = _find_date(line, day_first=day_first)
+        date, span = _find_date(line, day_first=day_first, reporting_year=reporting_year)
         if date is None or span is None:
             continue
         candidates = _count_candidates(line, span)
@@ -673,7 +721,9 @@ def _parse_lines(lines: list[str], *, day_first: bool) -> list[_ParsedRow]:
     return parsed
 
 
-def parse_ocr_text(text: str, *, day_first: bool | None = None) -> list[dict[str, Any]]:
+def parse_ocr_text(
+    text: str, *, day_first: bool | None = None, reporting_year: int | None = None
+) -> list[dict[str, Any]]:
     """Parse OCR text into candidate ``{date, demand_qty}`` rows.
 
     Each output line is expected to carry one date and one demand count,
@@ -696,6 +746,10 @@ def parse_ocr_text(text: str, *, day_first: bool | None = None) -> list[dict[str
             right).
         day_first: Force day-first or month-first parsing for ambiguous
             numeric dates. ``None`` infers it from the sheet.
+        reporting_year: Year to use for a date written without one (``Oct 1``,
+            ``3 Jan``). ``None`` uses the current year, which is right for a log
+            kept this year and wrong for an archive page — callers that know
+            which reporting period the sheet covers should pass it.
 
     Returns:
         Candidate rows with ``row_index``, ISO ``date``, ``demand_qty``,
@@ -706,7 +760,9 @@ def parse_ocr_text(text: str, *, day_first: bool | None = None) -> list[dict[str
         day_first = _infer_day_first(text)
     return [
         parsed.as_row(index)
-        for index, parsed in enumerate(_parse_lines(text.splitlines(), day_first=day_first))
+        for index, parsed in enumerate(
+            _parse_lines(text.splitlines(), day_first=day_first, reporting_year=reporting_year)
+        )
     ]
 
 
@@ -785,11 +841,24 @@ def _page_segmentation_modes() -> list[int]:
 
 @dataclass(frozen=True, slots=True)
 class _Word:
-    """One Tesseract word: where it sits in its line, and its box."""
+    """One Tesseract word: its text, where it sits in its line, and its box."""
 
+    text: str
     start: int  # offset into the line with its whitespace removed
     end: int
     box: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class _WordData:
+    """One segmentation mode's word-level output."""
+
+    mean_confidence: float | None
+    by_line: dict[str, list[_Word]]
+    # Every word in engine order. The line-based parser uses `by_line`; the
+    # layout reconstruction regroups these by position, because a sheet read
+    # column-by-column has dates and counts in different engine lines.
+    words: tuple[_Word, ...]
 
 
 def _line_key(text: str) -> str:
@@ -804,8 +873,8 @@ def _squeezed_span(line: str, span: tuple[int, int]) -> tuple[int, int]:
 
 def _read_word_data(  # type: ignore[no-untyped-def]
     image, language: str, psm: int, timeout: float
-) -> tuple[float | None, dict[str, list[_Word]]]:
-    """Tesseract's words for one mode: mean confidence, and boxes grouped by line.
+) -> _WordData:
+    """Tesseract's words for one mode: mean confidence, and the words themselves.
 
     Word confidence is a real engine score, unlike the line-legibility value in
     each row; the preview reports it separately so the two are never conflated.
@@ -865,16 +934,150 @@ def _read_word_data(  # type: ignore[no-untyped-def]
         grouped[key].append((word, box))
 
     by_line: dict[str, list[_Word]] = {}
+    flat: list[_Word] = []
     for key in order:
         offset = 0
         words: list[_Word] = []
         for word, box in grouped[key]:
-            words.append(_Word(start=offset, end=offset + len(word), box=box))
+            entry = _Word(text=word, start=offset, end=offset + len(word), box=box)
+            words.append(entry)
+            flat.append(entry)
             offset += len(word)
         by_line.setdefault(_line_key(" ".join(word for word, _ in grouped[key])), words)
 
     mean_confidence = round(sum(scores) / len(scores) / 100.0, 4) if scores else None
-    return mean_confidence, by_line
+    return _WordData(mean_confidence=mean_confidence, by_line=by_line, words=tuple(flat))
+
+
+def _row_alignment_score(centres: list[tuple[float, float]], slope: float, x0: float) -> float:
+    """How sharply word centres collapse into horizontal bands at one slope.
+
+    Sum of squared band sizes: words that share a row pile into the same 2-pixel
+    band and raise the score, which is the alignment being looked for.
+    """
+    bins: dict[int, int] = {}
+    for x, y in centres:
+        key = int(round((y - slope * (x - x0)) / 2.0))
+        bins[key] = bins.get(key, 0) + 1
+    return float(sum(count * count for count in bins.values()))
+
+
+def _row_slope(words: list[_Word] | tuple[_Word, ...]) -> float:
+    """How far the rows drift down to the right, measured from the words.
+
+    Deskew straightens the page, but handwriting wanders and a photo can still be
+    a degree off. On a wide sheet that is enough for the count column to sit a
+    line below its date, so a small range of slopes is searched and the one that
+    makes the bands sharpest wins — unless plain horizontal is nearly as good, in
+    which case nothing is tilted on noise.
+    """
+    if len(words) < 4:
+        return 0.0
+    centres = [(word.box[0] + word.box[2] / 2, word.box[1] + word.box[3] / 2) for word in words]
+    x0 = min(x for x, _ in centres)
+    steps = round(_ROW_SLOPE_LIMIT / _ROW_SLOPE_STEP)
+    scored = [
+        (_row_alignment_score(centres, step * _ROW_SLOPE_STEP, x0), step)
+        for step in range(-steps, steps + 1)
+    ]
+    horizontal = next(score for score, step in scored if step == 0)
+    best = max(score for score, _ in scored)
+    if best < horizontal * 1.02:
+        return 0.0
+    # Several slopes can read a page equally well — a small tilt that puts every
+    # count beside its date, and a large one that pairs the date with the next
+    # row's count instead. Both collapse words into the same number of bands, so
+    # among the near-best slopes the smallest wins: the drift being corrected is
+    # small, and a large angle is only ever pairing the wrong rows.
+    near_best = [(abs(step), step) for score, step in scored if score >= best * 0.98]
+    return min(near_best)[1] * _ROW_SLOPE_STEP
+
+
+def _visual_rows(words: list[_Word] | tuple[_Word, ...]) -> list[list[_Word]]:
+    """Group words into the rows a human sees, ignoring Tesseract's own lines.
+
+    A two-column sheet is often read column-by-column — every date in one engine
+    line, every count in another — so a parser that trusts the engine's lines
+    finds no line carrying both fields and imports nothing. Grouping by vertical
+    position and reading each band left to right puts the date and its count back
+    on one row, which is the association the operator would make.
+
+    Two things make that reliable on a real page. The bands follow the page's own
+    drift (``_row_slope``), so a slanted line does not split its left and right
+    halves; and a word joins a band only when it sits mostly inside it, so rows
+    written close together stay separate — a merged row pairs a date with the
+    wrong day's count, which is worse than missing a row.
+    """
+    if not words:
+        return []
+    slope = _row_slope(words)
+    x0 = min(word.box[0] for word in words)
+
+    def top(word: _Word) -> float:
+        # Remove the drift: a word further right is measured as if its row had
+        # been written on a horizontal baseline.
+        return word.box[1] - slope * (word.box[0] + word.box[2] / 2 - x0)
+
+    rows: list[list[_Word]] = []
+    bands: list[tuple[float, float]] = []
+    for word in sorted(words, key=top):
+        word_top = top(word)
+        word_bottom = word_top + word.box[3]
+        target: int | None = None
+        # Sorted by top, so only the most recent bands can still overlap.
+        for index in range(len(rows) - 1, max(-1, len(rows) - 4), -1):
+            band_top, band_bottom = bands[index]
+            overlap = min(word_bottom, band_bottom) - max(word_top, band_top)
+            if word.box[3] and overlap / word.box[3] >= _ROW_OVERLAP:
+                target = index
+                break
+        if target is None:
+            rows.append([word])
+            bands.append((word_top, word_bottom))
+            continue
+        rows[target].append(word)
+        band_top, band_bottom = bands[target]
+        bands[target] = (min(band_top, word_top), max(band_bottom, word_bottom))
+    return [sorted(row, key=lambda word: word.box[0]) for row in rows]
+
+
+def _row_text(row: list[_Word]) -> tuple[str, list[_Word]]:
+    """A visual row's text, with word offsets rebuilt for that text."""
+    parts: list[str] = []
+    words: list[_Word] = []
+    offset = 0
+    for word in row:
+        words.append(_Word(text=word.text, start=offset, end=offset + len(word.text), box=word.box))
+        parts.append(word.text)
+        offset += len(word.text)
+    return " ".join(parts), words
+
+
+def _cells_extraction(
+    words: list[_Word] | tuple[_Word, ...],
+    prep: _Preprocess,
+    *,
+    day_first: bool,
+    reporting_year: int | None = None,
+) -> list[dict[str, Any]]:
+    """Read the sheet as rows of cells rather than as engine lines.
+
+    Each visual row is parsed with the same rules as a line (one date, one count)
+    but its words are known individually, so the value's box comes straight from
+    the words that produced it instead of being matched back by text.
+    """
+    rows: list[dict[str, Any]] = []
+    for visual_row in _visual_rows(words):
+        text, row_words = _row_text(visual_row)
+        parsed = _parse_lines([text], day_first=day_first, reporting_year=reporting_year)
+        if not parsed:
+            continue
+        row_dicts = [entry.as_row(index) for index, entry in enumerate(parsed)]
+        _attach_boxes(parsed, row_dicts, {_line_key(text): row_words}, prep)
+        rows.extend(row_dicts)
+    for index, row in enumerate(rows):
+        row["row_index"] = index
+    return rows
 
 
 def _union_box(words: list[_Word], span: tuple[int, int]) -> tuple[int, int, int, int] | None:
@@ -928,8 +1131,12 @@ def _extraction_score(
     return (distinct, -duplicates, plausible, mean_confidence or 0.0)
 
 
-def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
+def _tesseract_extraction(
+    content: bytes, language: str, *, reporting_year: int | None = None
+) -> ImageExtraction:
     """Run local Tesseract with preprocessing and several layout modes.
+
+    ``reporting_year`` is used for dates the sheet leaves yearless.
 
     Raises:
         ImportError: If ``pytesseract`` or Pillow is not installed.
@@ -955,17 +1162,33 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
             failures.append(f"psm {psm}: {exc}")
             continue
 
-        parsed = _parse_lines(text.splitlines(), day_first=_infer_day_first(text))
-        if not parsed:
-            continue
-        rows = [row.as_row(index) for index, row in enumerate(parsed)]
+        day_first = _infer_day_first(text)
+        parsed = _parse_lines(text.splitlines(), day_first=day_first, reporting_year=reporting_year)
+        line_rows = [row.as_row(index) for index, row in enumerate(parsed)]
         try:
-            mean_confidence, words_by_line = _read_word_data(image, language, psm, timeout)
-        except Exception:
-            mean_confidence, words_by_line = None, {}
-        if words_by_line:
-            _attach_boxes(parsed, rows, words_by_line, prep)
+            word_data: _WordData | None = _read_word_data(image, language, psm, timeout)
+        except Exception:  # geometry is an aid, not a requirement
+            word_data = None
 
+        mean_confidence = word_data.mean_confidence if word_data else None
+        rows, row_source = line_rows, "lines"
+        if word_data is not None:
+            if line_rows:
+                _attach_boxes(parsed, line_rows, word_data.by_line, prep)
+            # A sheet read column-by-column has every date in one engine line and
+            # every count in another, so the line parser sees two halves it
+            # cannot join. Re-grouping by position recovers those pairs; it is
+            # only taken when it explains more of the page than the lines did.
+            cell_rows = _cells_extraction(
+                word_data.words, prep, day_first=day_first, reporting_year=reporting_year
+            )
+            if _extraction_score(cell_rows, mean_confidence) > _extraction_score(
+                line_rows, mean_confidence
+            ):
+                rows, row_source = cell_rows, "cells"
+
+        if not rows:
+            continue
         score = _extraction_score(rows, mean_confidence)
         candidate = ImageExtraction(
             rows=rows,
@@ -976,6 +1199,9 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
                 "rows": len(rows),
                 "distinct_dates": score[0],
                 "duplicate_dates": -score[1],
+                # Which reconstruction produced the rows: `lines` (the engine's
+                # own lines) or `cells` (regrouped by position).
+                "row_source": row_source,
             },
         )
         if best is None or best_score is None or score > best_score:
@@ -993,9 +1219,11 @@ def _tesseract_extraction(content: bytes, language: str) -> ImageExtraction:
     )
 
 
-def _extract_via_tesseract(content: bytes, language: str) -> list[dict[str, Any]]:
+def _extract_via_tesseract(
+    content: bytes, language: str, *, reporting_year: int | None = None
+) -> list[dict[str, Any]]:
     """The extracted rows alone, kept for callers that do not need quality."""
-    return _tesseract_extraction(content, language).rows
+    return _tesseract_extraction(content, language, reporting_year=reporting_year).rows
 
 
 # Which engine produced an extraction. The screen needs this because the two
@@ -1015,12 +1243,18 @@ class ImageExtraction:
     quality: dict[str, Any] = field(default_factory=dict)
 
 
-def extract_rows_with_engine(content: bytes, filename: str) -> ImageExtraction:
+def extract_rows_with_engine(
+    content: bytes, filename: str, *, reporting_year: int | None = None
+) -> ImageExtraction:
     """Extract candidate demand rows from an image, using the best engine.
 
     Tries the configured remote service, then local Tesseract, and otherwise
     returns no rows (never fabricated ones). Engine failures are logged and
     degrade to an empty extraction so the operator can still type rows in.
+
+    ``reporting_year`` is applied to dates the sheet writes without a year. It
+    only affects the local parser: a remote service returns its own dates, read
+    with its own date model, and is trusted as-is.
 
     The reported engine matters to the caller: a remote vision service returns a
     *model* confidence, while the local parser's ``confidence`` is a readability
@@ -1052,7 +1286,9 @@ def extract_rows_with_engine(content: bytes, filename: str) -> ImageExtraction:
         remote_failure = None
 
     try:
-        extraction = _tesseract_extraction(content, getattr(settings, "ocr_language", "eng"))
+        extraction = _tesseract_extraction(
+            content, getattr(settings, "ocr_language", "eng"), reporting_year=reporting_year
+        )
         logger.info("tesseract OCR extracted %s rows from %s", len(extraction.rows), filename)
         return extraction
     except ImportError:
@@ -1076,9 +1312,11 @@ def extract_rows_with_engine(content: bytes, filename: str) -> ImageExtraction:
         return ImageExtraction(rows=[], engine=ENGINE_NONE, detail=detail)
 
 
-def extract_rows_from_image(content: bytes, filename: str) -> list[dict[str, Any]]:
+def extract_rows_from_image(
+    content: bytes, filename: str, *, reporting_year: int | None = None
+) -> list[dict[str, Any]]:
     """The candidate rows alone, for callers that do not need the engine."""
-    return extract_rows_with_engine(content, filename).rows
+    return extract_rows_with_engine(content, filename, reporting_year=reporting_year).rows
 
 
 def _note_for(extraction: ImageExtraction) -> str:
@@ -1130,13 +1368,20 @@ def _row_warnings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return warnings
 
 
-def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
+def preview_for_image(
+    content: bytes, filename: str, *, reporting_year: int | None = None
+) -> dict[str, Any]:
     """Build the preview payload stored on ``ingest_uploads.preview`` for images.
 
     Invalid bytes still produce a well-formed preview (never an exception): the
     upload route rejects them with a 400, while a direct caller gets the same
     honest empty result with the reason. The review screen must never be handed
     rows the engine did not produce.
+
+    ``reporting_year`` is the operator's answer to "which year is this page?" for
+    dates written without one. It is stored with the preview so a retry reads the
+    page under the same assumption instead of silently switching to the current
+    year.
     """
     try:
         info = validate_image_upload(content, filename)
@@ -1148,11 +1393,12 @@ def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
             "engine": ENGINE_NONE,
             "note": f"{exc}. Add the rows manually, or upload a valid image.",
             "warnings": [],
+            "reporting_year": reporting_year,
             "quality": {"width": None, "height": None, "format": None},
             "extracted_at": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
-    extraction = extract_rows_with_engine(content, filename)
+    extraction = extract_rows_with_engine(content, filename, reporting_year=reporting_year)
     return {
         "headers": ["date", "demand_qty", "location"],
         "rows": extraction.rows,
@@ -1164,6 +1410,7 @@ def preview_for_image(content: bytes, filename: str) -> dict[str, Any]:
         # Duplicate or conflicting dates, so the screen can raise them before the
         # operator commits rows that would overwrite each other.
         "warnings": _row_warnings(extraction.rows),
+        "reporting_year": reporting_year,
         # Measured engine metadata, separate from each row's line-legibility
         # score: dimensions help explain a failed read, and mean_confidence is a
         # real Tesseract/vision-model score rather than a heuristic.

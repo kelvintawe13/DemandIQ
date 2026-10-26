@@ -44,6 +44,29 @@ describe('UploadImagePanel', () => {
     expect(onUploaded).not.toHaveBeenCalled();
   });
 
+  it('sends the reporting year that yearless dates should be written in', async () => {
+    /* "12 Oct" on the page has no year; the year the operator states is what
+       turns it into a real date. Sending nothing would silently use today's
+       year and misfile an archive page as this year's demand. */
+    mockPostForm.mockResolvedValue({
+      job_id: 'job-1',
+      status: 'ready',
+      filename: 'records.png',
+    });
+    render(<UploadImagePanel onUploaded={vi.fn()} />);
+
+    const yearField = screen.getByLabelText(/Year for dates without one/i);
+    expect((yearField as HTMLInputElement).value).toBe(String(new Date().getFullYear()));
+    fireEvent.change(yearField, { target: { value: '2024' } });
+
+    chooseFile(new File(['png'], 'records.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(mockPostForm).toHaveBeenCalledTimes(1));
+    const form = mockPostForm.mock.calls[0][1] as FormData;
+    expect(form.get('reporting_year')).toBe('2024');
+    expect((form.get('file') as File).name).toBe('records.png');
+  });
+
   it('uploads a supported image and hands the job id back to the page', async () => {
     mockPostForm.mockResolvedValue({
       job_id: 'job-1',

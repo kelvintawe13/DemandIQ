@@ -68,6 +68,7 @@ from app.security.permissions import (
     has_capability,
 )
 from app.security.rate_limit import rate_limit_dependency
+from app.services.ingestion.channels import channel_for_source, record_import
 from app.services.ingestion.normaliser import NormaliserError, commit_demand
 
 router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
@@ -566,6 +567,9 @@ def device_demand(
     committed = 0
     reconciled = 0
     errors: list[dict[str, Any]] = []
+    # Till pushes are a channel too. Without one, demand that arrived from the
+    # tills was unattributable and appeared on Sources as nothing at all.
+    channel = channel_for_source(db, principal.workspace_id, "device")
 
     for idx, item in enumerate(payload):
         try:
@@ -581,6 +585,7 @@ def device_demand(
                 date=item.date,
                 demand_qty=item.demand_qty,
                 source="device",
+                source_id=channel.id if channel is not None else None,
                 notes=item.notes,
             )
             if result.created:
@@ -595,6 +600,16 @@ def device_demand(
     # against a customer's forecast.
     request.state.workspace_id = principal.workspace_id  # type: ignore[attr-defined]
     request.state.device_id = row.id  # type: ignore[attr-defined]
+
+    if channel is not None:
+        record_import(
+            db,
+            channel,
+            committed=committed,
+            updated=reconciled,
+            skipped=len(errors),
+            detail=f"device {row.id}: {committed} new, {reconciled} corrected",
+        )
 
     return {
         "data": {

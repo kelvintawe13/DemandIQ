@@ -100,6 +100,22 @@ def test_parse_ocr_text_defaults_ambiguous_numeric_dates_to_day_first() -> None:
     assert rows[0]["date"] == "2026-02-01"
 
 
+def test_a_yearless_date_uses_the_stated_reporting_year() -> None:
+    """ "Oct 1" on a page the operator says is 2024 is 2024-10-01.
+
+    The current year was assumed instead, so an archive page imported as this
+    year's demand — and nothing downstream could tell it from a real reading.
+    """
+    rows = parse_ocr_text("Oct 1 58\n3 Jan 44", reporting_year=2024)
+    assert [row["date"] for row in rows] == ["2024-10-01", "2024-01-03"]
+
+
+def test_a_date_with_its_own_year_ignores_the_reporting_year() -> None:
+    # The sheet said 2026; the operator's answer only fills a gap.
+    row = parse_ocr_text("October 12, 2026 73", reporting_year=2024)[0]
+    assert row["date"] == "2026-10-12"
+
+
 def test_parse_ocr_text_can_be_told_the_date_order() -> None:
     """Callers that know their locale can resolve an otherwise ambiguous row."""
     rows = parse_ocr_text("01/02/2026 90", day_first=False)
@@ -311,7 +327,7 @@ def test_ocr_preview_names_the_engine_that_read_the_photo() -> None:
 
         monkeypatch.setattr(
             "app.services.ingestion.image._tesseract_extraction",
-            lambda content, language: ImageExtraction(
+            lambda content, language, **kwargs: ImageExtraction(
                 rows=parse_ocr_text("12/01/2026   112"),
                 engine=ENGINE_TESSERACT,
                 quality={"page_segmentation_mode": 6, "mean_confidence": 0.91},

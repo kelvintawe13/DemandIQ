@@ -17,6 +17,7 @@ from app.models.location import Connector, DemandObservation
 from app.models.pipeline import PipelineRun
 from app.models.user import User, UserRole
 from app.models.workspace import Workspace
+from app.routers.sources import _INGESTION_JOB_TYPES
 
 
 def _make_workspace() -> Workspace:
@@ -138,6 +139,82 @@ def test_sources_list_returns_connectors_aggregated() -> None:
     assert "freshness" in src
     assert "volume" in src
     assert "health" in src
+    # An administrator's connector is pullable: no import kind, so the screen
+    # keeps offering Sync for it.
+    assert src["import_kind"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_sources_list_reports_the_import_kind_of_a_channel_it_created() -> None:
+    """An import channel is identified by the kind that fills it.
+
+    The row carries other credentials in production; only ``import_kind`` may
+    leave the API, so this asserts the value is picked out of the object rather
+    than the whole thing being echoed.
+    """
+    ws = _make_workspace()
+    user = _make_user(ws.id)
+    conn = _make_connector(ws.id, name="Spreadsheet uploads")
+    conn.type = "file"
+    conn.credentials = {"import_kind": "file", "secret": "must-not-leak"}
+    connectors = {conn.id: conn}
+
+    mock_db = MagicMock()
+    mock_db.scalars.side_effect = _mock_scalars_for(connectors)
+    mock_db.flush = MagicMock()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: mock_db  # type: ignore[assignment]
+    app.dependency_overrides[get_current_user] = lambda: user  # type: ignore[assignment]
+    client = TestClient(app)
+
+    resp = client.get("/api/v1/sources")
+    assert resp.status_code == 200, resp.text
+    src = resp.json()["data"][0]
+    assert src["import_kind"] == "file"
+    assert "must-not-leak" not in resp.text
+
+    app.dependency_overrides.clear()
+
+
+def test_sync_history_query_is_limited_to_ingestion_jobs() -> None:
+    """The filter has to be in the SQL: the panel lists what it is given.
+
+    ``pipeline_runs`` holds every job type and the scheduler writes
+    ``report_generation`` once a minute, so an unfiltered query fills a panel
+    called "Sync history" with report renders that say nothing about ingestion.
+    """
+    ws = _make_workspace()
+    user = _make_user(ws.id)
+    captured: list[str] = []
+
+    mock_db = MagicMock()
+
+    def fake_scalars(stmt):  # type: ignore[no-untyped-def]
+        captured.append(str(stmt))
+
+        class _R:
+            def all(self) -> list:  # type: ignore[no-untyped-def]
+                return []
+
+        return _R()
+
+    mock_db.scalars.side_effect = fake_scalars
+
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: mock_db  # type: ignore[assignment]
+    app.dependency_overrides[get_current_user] = lambda: user  # type: ignore[assignment]
+    client = TestClient(app)
+
+    resp = client.get("/api/v1/sources/sync-history")
+    assert resp.status_code == 200, resp.text
+    assert captured, "the endpoint never queried pipeline_runs"
+    sql = captured[0]
+    assert "pipeline_runs.job_type IN" in sql
+    # The IN list is passed as a bound parameter, so the values are pinned where
+    # they are declared: both halves of the pair that actually move data.
+    assert set(_INGESTION_JOB_TYPES) == {"connector_sync", "feature_materialisation"}
 
     app.dependency_overrides.clear()
 

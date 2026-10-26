@@ -30,7 +30,7 @@ this backend today**, and all five resolve to the same row:
 | --- | --- | --- |
 | Manual entry | `POST /ingest/manual` | Validated row by row; a bad row is reported with its index and the good rows still commit |
 | Spreadsheet | Upload (`POST /ingest/file`) | Sniff delimiter and encoding, find the header under title/date-range lines, skip `TOTAL`/blank/`n/a` furniture, apply the user's column mapping |
-| Photo | Upload (`POST /ingest/image`) | Validate and decode, flatten the lighting, deskew, read candidate rows with the remote service or local Tesseract, always human-confirmed before commit |
+| Photo | Upload (`POST /ingest/image`) | Validate and decode, flatten the lighting, deskew, read candidate rows with the remote service or local Tesseract (re-grouping words into rows when a column-wise read split the dates from their counts), always human-confirmed before commit |
 | Enrolled till | `POST /devices/{id}/demand` with `X-Device-Key` | Workspace and location come from the device credential, never from the request body |
 | POS / MoMo connector | Polling pull (`POST /connectors/{id}/pull`) and the queued sync job | Map provider fields onto the canonical four through a stored `ConnectorMapping`, coercing types |
 
@@ -42,6 +42,18 @@ The canonical row is `(workspace_id, location_id, date, demand_qty, notes,
 recorded_at)`. There is no `source` column: the channel is written as a
 `[source:<tag>]` note, beside `upload_id` or `source_id` where one applies, and
 `GET /ingest/demand` reads the tag back as `source`.
+
+Every one of the five channels also owns a **row in `connectors`**, because
+`GET /sources` is a view over that table: without one, a workspace that imported
+everything by spreadsheet or by hand had a full demand series and "No sources
+connected" on the screen that is meant to answer "where did this come from?".
+`services/ingestion/channels.py` creates the channel on first use —
+`Spreadsheet uploads` (`file`), `Photo uploads` (`ocr`), `Manual entry`
+(`manual`), `Till devices` (`pos`) — stamps `last_sync_at` and the
+`last_pull_*` counts from the import, and tags each row with its `source_id`.
+Those channels are `available`, never `active`: `_job_connector_sync` pulls every
+active connector from the endpoint in its credentials, and an import has no
+endpoint to pull.
 
 Commit rules, enforced in one place
 (`services/ingestion/normaliser.py::commit_demand`) so no channel can bypass them:
@@ -192,3 +204,15 @@ Every one of these surfaces in the UI through the shared `EmptyState` or
 - Nightly batch for 10k locations: under 20 minutes.
 - Ingestion write acknowledgement: p95 under 500 ms; pulls and OCR runs are
   queued as background jobs.
+
+## Measuring OCR accuracy
+
+Recognition accuracy on handwriting is measured, not assumed.
+`scripts/ocr_accuracy.py` runs the real extraction path over a directory of
+photos and a verified reference sheet (`image,date,demand_qty[,box]`) and reports,
+per page and in total: dates recalled, counts matched, complete date-count pairs,
+missing / spurious / duplicated / misattributed rows, highlight coverage and IoU
+against any marked box, and seconds per page. `--self-check` renders printed
+pages and scores them, which proves the harness is wired correctly — it is not a
+claim about handwriting, and the only meaningful number comes from verified
+photos of real sheets.

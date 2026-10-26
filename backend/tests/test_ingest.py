@@ -700,18 +700,26 @@ def test_image_job_lifecycle() -> None:
 
     client = TestClient(app)
 
-    # Upload image
+    # Upload image, stating which year the page belongs to.
     resp = client.post(
         "/api/v1/ingest/image",
         files={"file": ("log.png", io.BytesIO(_ONE_PIXEL_PNG), "image/png")},
+        data={"reporting_year": "2024"},
     )
     assert resp.status_code == 201, resp.text
     job_id = resp.json()["job_id"]
+
+    # The stated year is what yearless dates were read as, and it is kept with
+    # the preview so a retry re-reads the page under the same assumption instead
+    # of sliding every row into the current year.
+    staged = store[uuid.UUID(job_id)]
+    assert staged.preview["reporting_year"] == 2024
 
     # GET job
     resp = client.get(f"/api/v1/ingest/image/{job_id}")
     assert resp.status_code == 200
     assert resp.json()["job_id"] == job_id
+    assert resp.json()["reporting_year"] == 2024
 
     # Commit corrected rows
     resp = client.post(

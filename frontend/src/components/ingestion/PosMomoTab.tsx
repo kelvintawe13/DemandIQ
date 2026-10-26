@@ -28,6 +28,7 @@ import {
   kindLabel,
   kindOf,
   stateOf,
+  syncBlockedReason,
 } from '../../lib/sourceChannels';
 import { plainStatus } from '../../lib/plainLanguage';
 
@@ -521,11 +522,10 @@ export function PosMomoTab({ onRouteToSpreadsheet }: PosMomoTabProps) {
                     /* Disabled for a channel the job skips, so pressing Sync
                        cannot produce a "successful" run that pulled nothing. */
                     disabled={syncingKind !== null || !isSyncable(source)}
-                    title={
-                      isSyncable(source)
-                        ? undefined
-                        : 'Only an active channel can be pulled — an administrator activates it on Connectors'
-                    }
+                    /* The same reason the Sources page gives: a channel filled
+                       by till pushes has nothing to pull, and telling the
+                       operator to activate it would not make Sync work. */
+                    title={syncBlockedReason(source)}
                     onClick={() => void syncNow(kindOf(source))}
                     className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-fine font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
                   >

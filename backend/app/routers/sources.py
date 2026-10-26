@@ -50,6 +50,18 @@ router = APIRouter(
 )
 
 
+# The runs this endpoint is allowed to answer with.
+#
+# ``pipeline_runs`` is one table for every job the scheduler and worker run, and
+# the scheduler writes ``report_generation`` once a minute. Returning the newest
+# rows regardless of type therefore filled a panel titled "Recent ingestion
+# runs" with 20 rows of "Success · 0 rows · no queued reports" — real rows that
+# say nothing about ingestion, burying the 259 connector syncs underneath. A run
+# is listed when it moves source data: the pull itself, and the feature build
+# that consumes what it wrote.
+_INGESTION_JOB_TYPES = ("connector_sync", "feature_materialisation")
+
+
 def _error(code: int, err: str, msg: str, field: str | None = None) -> HTTPException:
     return HTTPException(
         status_code=code,
@@ -123,6 +135,16 @@ def list_sources(
                 "last_sync_at": conn.last_sync_at.isoformat() if conn.last_sync_at else None,
                 "volume": volume,
                 "health": health,
+                # The import kind this channel was created for, when it is one of
+                # the channels ingestion registers itself (see
+                # app/services/ingestion/channels.py). ``None`` for a connector an
+                # administrator configured, which is pullable and can be synced.
+                # Only this key is read from ``credentials``: the rest is secret.
+                "import_kind": (
+                    (conn.credentials or {}).get("import_kind")
+                    if isinstance(conn.credentials, dict)
+                    else None
+                ),
                 # This channel's own last pull, not the workspace-wide job row:
                 # ``pipeline_runs`` records no connector id, so a per-source
                 # filter there is impossible. Counts are ``None`` until a pull
@@ -147,8 +169,16 @@ def sync_history(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Recent sync runs from pipeline_runs (workspace-scoped)."""
-    q = select(PipelineRun).where(PipelineRun.workspace_id == current_user.workspace_id)
+    """Recent ingestion runs from pipeline_runs (workspace-scoped).
+
+    Filtered to ``_INGESTION_JOB_TYPES``: every other job type writes to this
+    table too, and a screen called "Sync history" must not answer with report
+    renders and forecast publications.
+    """
+    q = select(PipelineRun).where(
+        PipelineRun.workspace_id == current_user.workspace_id,
+        PipelineRun.job_type.in_(_INGESTION_JOB_TYPES),
+    )
     if cursor:
         try:
             ts = datetime.datetime.fromisoformat(cursor)

@@ -147,12 +147,15 @@ def test_retry_reads_the_stored_original_again(monkeypatch: pytest.MonkeyPatch) 
     ws = _make_workspace()
     user = _make_user(ws.id)
     upload = _make_upload(ws.id, status="failed", row_count=0)
+    # The page was read under a stated reporting year; the retry has to reuse it.
+    upload.preview = {"rows": [], "reporting_year": 2024}
     db = _db_for(upload)
 
-    seen: list[tuple[bytes, str]] = []
+    seen: list[tuple[bytes, str, int | None]] = []
 
-    def fake_preview(data: bytes, filename: str) -> dict:
-        seen.append((data, filename))
+    def fake_preview(data: bytes, filename: str, **kwargs: object) -> dict:
+        reporting_year = kwargs.get("reporting_year")
+        seen.append((data, filename, reporting_year if isinstance(reporting_year, int) else None))
         return {
             "headers": ["date", "demand_qty"],
             "rows": [{"date": "2026-10-01", "demand_qty": 58}],
@@ -172,8 +175,9 @@ def test_retry_reads_the_stored_original_again(monkeypatch: pytest.MonkeyPatch) 
         "engine": "tesseract",
         "status": "ready",
     }
-    # The bytes it re-read are the ones that were stored, not a new upload.
-    assert seen == [(_ONE_PIXEL_PNG, "log.png")]
+    # The bytes it re-read are the ones that were stored, not a new upload — and
+    # the year the operator chose, not the year it happens to be today.
+    assert seen == [(_ONE_PIXEL_PNG, "log.png", 2024)]
     assert upload.row_count == 21
     assert upload.status == "ready"
     assert upload.error_count == 0

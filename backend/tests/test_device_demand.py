@@ -78,6 +78,12 @@ class _Session:
     def add(self, obj: Any) -> None:
         self.added.append(obj)
 
+    def execute(self, _stmt: Any) -> None:
+        # The import channels are inserted with a Postgres ``INSERT ... ON
+        # CONFLICT``; nothing here asserts on that row, it only has to exist for
+        # the call to type-check against a session-like object.
+        return None
+
     def flush(self) -> None:
         return None
 

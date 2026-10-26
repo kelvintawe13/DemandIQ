@@ -69,6 +69,20 @@ beforeEach(() => {
 });
 
 describe('Recent uploads list', () => {
+  it('sits below the upload tabs, not above them', async () => {
+    // The screen is for staging new data; the history of what was staged is a
+    // follow-up question, so it sits after the panels rather than pushing them
+    // below the fold.
+    mockGet.mockResolvedValue(page([upload(1)], false));
+    render(<ImportDemandData />);
+
+    const tabs = await screen.findByRole('tablist');
+    const heading = screen.getByRole('heading', { name: 'Recent uploads' });
+    expect(
+      tabs.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('pages forward and back through uploads without duplicating or dropping rows', async () => {
     mockGet
       .mockResolvedValueOnce(page([upload(1), upload(2)], true))
