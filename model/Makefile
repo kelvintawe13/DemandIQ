@@ -24,14 +24,14 @@ KAGGLE_DATA ?= kelvin567890kl/recruit-restaurant-visitor-forecasting
 # terminal to complete the browser OAuth. Afterwards, fully remote runs:
 #
 #   make colab-train                                  # CPU, Drive-backed
-#   make colab-train REPO_URL=https://github.com/kelvintawe12/DemandIQ.git
+#   make colab-train REPO_URL=https://github.com/kelvintawe13/DemandIQ.git
 #   make colab-train STAGES=ingest,lightgbm           # subset
 #   make colab-train STAGES=ingest,lightgbm,backtest  # + rolling-origin
 #   make colab-train GPU=T4                           # GPU runtime (not needed)
 #
 # One-shot ephemeral alternative (fresh VM, teardown after):
 #   colab run --keep scripts/colab/train_remote.py
-REPO_URL ?= https://github.com/kelvintawe12/DemandIQ.git
+REPO_URL ?= https://github.com/kelvintawe13/DemandIQ.git
 REPO_REF ?= main
 COLAB_SESSION ?= diq
 COLAB_GPU ?=

@@ -45,7 +45,7 @@ _CFG = json.loads(_CFG_PATH.read_text()) if _CFG_PATH.exists() else {}
 def _cfg(key: str, env: str, default: str) -> str:
     return str(_CFG.get(key) or os.environ.get(env) or default)
 
-REPO_URL = _cfg("repo_url", "DIQ_REPO_URL", "https://github.com/kelvintawe12/DemandIQ.git")  # EDIT
+REPO_URL = _cfg("repo_url", "DIQ_REPO_URL", "https://github.com/kelvintawe13/DemandIQ.git")  # EDIT
 REPO_REF = _cfg("repo_ref", "DIQ_REPO_REF", "main")
 TEST_START = _cfg("test_start", "DIQ_TEST_START", "2017-02-01")
 SEED = int(_cfg("seed", "DIQ_SEED", "42"))

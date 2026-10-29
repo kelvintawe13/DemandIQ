@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { XIcon, ScaleIcon, ShieldCheckIcon, CookieIcon } from 'lucide-react';
+import { XIcon, ShieldCheckIcon } from 'lucide-react';
 import { legalDocuments } from '../../data/legal';
 import type { LegalDocument } from '../../data/legal';
 import { useDialogBehaviour } from '../ui/useDialogBehaviour';
@@ -12,15 +12,8 @@ interface LegalModalProps {
   onSelect: (id: DocId) => void;
 }
 
-const icons: Record<DocId, typeof ScaleIcon> = {
-  terms: ScaleIcon,
-  privacy: ShieldCheckIcon,
-  cookies: CookieIcon
-};
-
 /**
- * Full legal reader. The three documents live side by side so someone who
- * opens "Terms" can reach "Privacy" without going back to the footer.
+ * Full legal reader. The document is displayed with navigation.
  */
 export function LegalModal({ openId, onClose, onSelect }: LegalModalProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -72,33 +65,6 @@ export function LegalModal({ openId, onClose, onSelect }: LegalModalProps) {
           </button>
         </header>
 
-        <nav
-          aria-label="Legal documents"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-3 py-2 sm:px-4 dark:border-slate-700">
-          
-          {legalDocuments.map((item) => {
-            const Icon = icons[item.id];
-            const isActive = item.id === openId;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => onSelect(item.id)}
-                className={[
-                'inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-meta transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
-                isActive ?
-                'bg-brand-600 font-semibold text-white' :
-                'font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'].
-                join(' ')}>
-                
-                <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-                {item.label}
-              </button>);
-
-          })}
-        </nav>
-
         <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           <p className="rounded-xl bg-brand-50 px-3.5 py-3 text-meta leading-relaxed text-brand-900 dark:bg-slate-800 dark:text-slate-200">
             {doc.summary}
@@ -125,9 +91,7 @@ export function LegalModal({ openId, onClose, onSelect }: LegalModalProps) {
           </div>
 
           <p className="mt-6 border-t border-slate-200 pt-4 text-micro leading-relaxed text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            Questions about this document? Write to legal@demandiq.app. DemandIQ is a
-            research-grounded decision-support tool; forecasts and surplus figures are
-            estimates, not guarantees.
+            Questions about this document? Write to k.tawe@alustudent.com.
           </p>
         </div>
 

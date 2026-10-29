@@ -45,10 +45,20 @@ const tabs = [
 ] as const;
 type TabId = (typeof tabs)[number]['id'];
 
+/**
+ * Where the photos in `public/` are served from.
+ *
+ * The built bundle is mounted at `/app/` (vite.config.ts `base`), so the files
+ * copied from `public/` sit beside index.html at `/app/images/...`. A
+ * root-absolute `/images/landing/...` is therefore a 404 in production, where
+ * the only thing at the root is the API. `BASE_URL` is `/` in dev and vitest.
+ */
+const assetBase = ((import.meta.env.BASE_URL as string | undefined) ?? '/').replace(/\/+$/, '');
+
 const heroSlides = [
-  { src: '/images/landing/restaurant.jpg', label: 'Restaurant dining room' },
-  { src: '/images/landing/service.jpg', label: 'Freshly prepared meal' },
-  { src: '/images/landing/terrace.jpg', label: 'Restaurant terrace' }
+  { src: `${assetBase}/images/landing/restaurant.jpg`, label: 'Restaurant dining room' },
+  { src: `${assetBase}/images/landing/service.jpg`, label: 'Freshly prepared meal' },
+  { src: `${assetBase}/images/landing/terrace.jpg`, label: 'Restaurant terrace' }
 ];
 
 const navGhost =
@@ -566,9 +576,7 @@ export function Landing({ onSignIn, onGetStarted }: LandingProps) {
             <span>© {new Date().getFullYear()} DemandIQ . V1</span>
             <span className="flex items-center gap-x-4">
               {[
-                { label: 'Privacy', id: 'privacy' as const },
-                { label: 'Terms', id: 'terms' as const },
-                { label: 'Cookies', id: 'cookies' as const }
+                { label: 'Privacy & Terms', id: 'privacy' as const }
               ].map((item) => (
                 <button key={item.id} type="button" onClick={() => openLegal(item.id)} className={footerLink}>
                   {item.label}

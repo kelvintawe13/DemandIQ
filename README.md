@@ -9,12 +9,12 @@ forecast with statistically valid uncertainty intervals, plain-language explanat
 of *why* a number moved, policy simulation for "what if we change this", and drift
 monitoring that admits when the model has stopped being trustworthy.
 
-[![Repo](https://img.shields.io/badge/github-kelvintawe12/DemandIQ-181717?logo=github)](https://github.com/kelvintawe12/DemandIQ)
+[![Repo](https://img.shields.io/badge/github-kelvintawe13/DemandIQ-181717?logo=github)](https://github.com/kelvintawe13/DemandIQ)
 [![Backend](https://img.shields.io/badge/API-179%20paths-0d948?logo=fastapi)](backend/API_ENDPOINTS.md)
 [![Frontend](https://img.shields.io/badge/tests-486%20passed-3fb950?logo=vitest)](frontend/src/__tests__)
 [![License](https://img.shields.io/badge/license-Proprietary-6b7280)](#license)
 
-**Repository:** <https://github.com/kelvintawe12/DemandIQ>
+**Repository:** <https://github.com/kelvintawe13/DemandIQ>
 
 
 **Video demo:** <https://drive.google.com/drive/folders/1w_Qtq6P1c3YwbjR1ygGxMKzfW-YHPcjl?usp=sharing>
@@ -799,7 +799,7 @@ Docker if Postgres is reachable.
 ### 1. Install
 
 ```bash
-git clone https://github.com/kelvintawe12/DemandIQ.git
+git clone https://github.com/kelvintawe13/DemandIQ.git
 cd DemandIQ
 
 npm run install:all

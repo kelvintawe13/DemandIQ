@@ -55,9 +55,9 @@ ocr = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kelvintawe12/DemandIQ"
-Documentation = "https://github.com/kelvintawe12/DemandIQ/blob/main/backend/ARCHITECTURE.md"
-"API Contract" = "https://github.com/kelvintawe12/DemandIQ/blob/main/backend/API_ENDPOINTS.md"
+Homepage = "https://github.com/kelvintawe13/DemandIQ"
+Documentation = "https://github.com/kelvintawe13/DemandIQ/blob/main/backend/ARCHITECTURE.md"
+"API Contract" = "https://github.com/kelvintawe13/DemandIQ/blob/main/backend/API_ENDPOINTS.md"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

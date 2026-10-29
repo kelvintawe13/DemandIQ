@@ -27,6 +27,10 @@ interface ExtractedRow {
   notes?: string | null;
   confidence?: number | null;
   boxes?: RowBoxes | null;
+  /** How many independent reads of the photo produced this date at all. */
+  readers?: number | null;
+  /** Share of those reads that produced the figure kept (1 = unanimous). */
+  agreement?: number | null;
 }
 
 interface PreviewPanelProps {
@@ -44,6 +48,9 @@ interface EditingRow {
   handAdded?: boolean;
   /** Where the engine read this row on the photo, when it reported geometry. */
   boxes?: RowBoxes | null;
+  /** Independent reads that found this date, and the share that agreed on it. */
+  readers?: number | null;
+  agreement?: number | null;
 }
 
 interface ImageJobResponse {
@@ -103,6 +110,28 @@ const ENGINE_LABEL: Record<string, string> = {
   remote: 'Read by the OCR service',
   tesseract: 'Read by the local OCR engine',
 };
+
+/**
+ * Whether the readings of the photo disagreed about this row.
+ *
+ * The local engine reads every page several ways — each layout mode, plus a
+ * binarised copy — and merges the results by agreement. A row where those reads
+ * disagreed is the one most likely to be wrong, and no other field says so: the
+ * `confidence` pill describes a single read's line, not the weight of evidence
+ * behind the record. A remote vision service reports no merge, so this is null
+ * and the model's own score stands alone.
+ */
+function isContested(row: EditingRow): boolean {
+  return row.agreement != null && row.agreement < 1;
+}
+
+/** How the disagreement reads in words, e.g. "2 of 3 readings agree". */
+function doubtLabel(row: EditingRow): string | null {
+  if (!isContested(row)) return null;
+  const readers = row.readers ?? 0;
+  const agreeing = Math.max(1, Math.round((row.agreement ?? 1) * readers));
+  return `${agreeing} of ${readers} readings agree`;
+}
 
 /** Position of a highlight box over the photo, from an OCR box in fractions. */
 function boxStyle(box?: number[] | null): CSSProperties | undefined {
@@ -187,14 +216,20 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
       setQuality(res.quality ?? null);
       // Initialise the editable copy, carrying each row's score so the review
       // step can point at the ones worth a second look.
-      setEditingRows(
-        rows.map((r) => ({
-          date: String(r.date ?? ''),
-          demand_qty: Number(r.demand_qty ?? r.visitors ?? 0),
-          confidence: r.confidence ?? null,
-          boxes: r.boxes ?? null
-        }))
-      );
+      const editable: EditingRow[] = rows.map((r) => ({
+        date: String(r.date ?? ''),
+        demand_qty: Number(r.demand_qty ?? r.visitors ?? 0),
+        confidence: r.confidence ?? null,
+        boxes: r.boxes ?? null,
+        readers: r.readers ?? null,
+        agreement: r.agreement ?? null
+      }));
+      // Rows the readings disagreed on come first: the operator should meet the
+      // doubtful figures before the clean ones. Sorted once, when the job loads
+      // — not on every edit, which would move a row out from under the cursor
+      // mid-correction. `sort` is stable, so page order survives inside each
+      // group.
+      setEditingRows([...editable].sort((a, b) => Number(isContested(b)) - Number(isContested(a))));
       // if rows empty but status not committed, keep polling maybe
       if (rows.length === 0 && res.status !== 'committed') {
         // OCR returned no readable rows; nothing to poll for.
@@ -329,6 +364,8 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
 
   /** Rows the engine flagged, or that the parser found ambiguous. */
   const flaggedRows = editingRows.filter((row) => scoreNote(engine, row).flagged);
+  /** Rows where independent reads of the same photo disagreed. */
+  const contestedRows = editingRows.filter(isContested);
 
   /**
    * Dates entered more than once. The commit upserts on (location, date), so only
@@ -568,6 +605,20 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                     .join(', ')}
                 </p>
               )}
+              {contestedRows.length > 0 && (
+                <p
+                  role="note"
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-caption leading-relaxed text-amber-900"
+                >
+                  <span className="font-semibold">
+                    {contestedRows.length} row{contestedRows.length === 1 ? '' : 's'} the readings
+                    disagreed on
+                  </span>{' '}
+                  — the photo was read more than one way, and these figures are the majority
+                  reading rather than a unanimous one. They are listed first; compare each with the
+                  photo before importing.
+                </p>
+              )}
               {flaggedRows.length > 0 && (
                 <p
                   role="note"
@@ -589,6 +640,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
               >
                 {editingRows.map((row, idx) => {
                   const note = scoreNote(engine, row);
+                  const doubt = doubtLabel(row);
                   return (
                     <li
                       key={idx}
@@ -624,6 +676,16 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                       >
                         {note.label}
                       </span>
+                      {/* Evidence about the record, separate from the pill above,
+                          which is about one read's line. */}
+                      {doubt && (
+                        <span
+                          data-ocr-doubt="reads"
+                          className="shrink-0 rounded-full bg-amber-200 px-2 py-0.5 text-fine font-semibold text-amber-900"
+                        >
+                          {doubt}
+                        </span>
+                      )}
                       {duplicateRowIndexes.has(idx) && (
                         <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-fine font-medium text-red-700">
                           Same date twice
@@ -718,9 +780,16 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
       >
         <ul className="flex flex-col divide-y divide-slate-100">
           {editingRows.map((row, idx) => (
-            <li key={idx} className="flex justify-between gap-3 py-2 text-body-xs">
+            <li key={idx} className="flex items-baseline justify-between gap-3 py-2 text-body-xs">
               <span className="tabular-nums text-slate-600">{row.date}</span>
-              <span className="font-semibold tabular-nums text-slate-900">{row.demand_qty} covers</span>
+              <span className="flex items-baseline gap-2">
+                {isContested(row) && (
+                  <span className="text-fine font-medium text-amber-800">readings differ</span>
+                )}
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {row.demand_qty} covers
+                </span>
+              </span>
             </li>
           ))}
           {editingRows.length === 0 && <li className="py-2 text-body-xs text-slate-500">No rows to import.</li>}

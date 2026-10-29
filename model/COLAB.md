@@ -161,7 +161,7 @@ Every run after that is fully headless - the Makefile wires it up:
 
 ```bash
 make colab-train                                  # CPU session, Drive-backed
-make colab-train REPO_URL=https://github.com/kelvintawe12/DemandIQ.git REPO_REF=main
+make colab-train REPO_URL=https://github.com/kelvintawe13/DemandIQ.git REPO_REF=main
 make colab-train STAGES=ingest,lightgbm           # subset of stages
 make colab-train STAGES=ingest,lightgbm,backtest  # + rolling-origin backtest
 make colab-train GPU=T4                           # GPU runtime (not needed)

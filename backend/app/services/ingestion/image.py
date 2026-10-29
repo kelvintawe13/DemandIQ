@@ -4,11 +4,17 @@ The adapter turns a photo of an operator's log into candidate
 ``{date, demand_qty}`` rows for human confirmation before commit
 (``ARCHITECTURE.md`` §"Handwritten photo → OCR → human-confirmed"):
 
-1. **Remote OCR/vision service** — when ``OCR_SERVICE_URL`` is configured the
-   image is POSTed there and the service returns JSON rows.
-2. **Local Tesseract** — used automatically when ``pytesseract`` and
-   ``Pillow`` are installed (``pip install 'demandiq-backend[ocr]'``).
-3. **Not configured** — returns no rows plus an explicit note telling the
+1. **Custom OCR service** — when ``OCR_SERVICE_URL`` is configured the image is
+   POSTed there and the service returns JSON rows.
+2. **Vision model** — when ``OCR_VISION_URL`` is configured the image is sent
+   to an OpenAI-shaped chat-completions endpoint and its JSON rows are used.
+   This is the path that can read *handwriting*: Tesseract recognises printed
+   glyphs, and on a measured hand-written page it recovered nine of twenty-one
+   days at best while the rest were never recognised by any layout mode.
+3. **Local Tesseract** — used automatically when ``pytesseract`` and
+   ``Pillow`` are installed (``pip install 'demandiq-backend[ocr]'``), and as
+   the fallback when a configured service fails or reads nothing.
+4. **Not configured** — returns no rows plus an explicit note telling the
    operator to type them in.
 
 The adapter never invents rows. A fabricated preview that an operator might
@@ -20,6 +26,7 @@ from __future__ import annotations
 
 import datetime
 import io
+import json
 import logging
 import math
 import re
@@ -73,10 +80,16 @@ _TEXT_DATE_MONTH_FIRST = re.compile(
 _INT = re.compile(r"(?<!\d)(\d{1,7})(?!\d)")
 
 # Tesseract frequently reads a printed/handwritten 7 as '/' when it ends a
-# count token ("2/" for 27). Only the unambiguous single-digit-before-slash
-# form is corrected; a date's "2/05" is left alone because a digit follows, and
+# count token ("2/" for 27). Only the unambiguous single-digit-before-glyph form
+# is corrected; a date's "2/05" is left alone because a digit follows, and
 # integers inside the date are not count candidates in the first place.
-_TRAILING_SEVEN = re.compile(r"(?<!\d)(\d)[/|\\](?!\d)")
+#
+# The same end-of-token 7 also comes back as an ``F`` when the stroke's top bar
+# is read as a vertical: on a measured page ``27`` was transcribed as ``2F``,
+# which parsed as 2 and staged a 27-visitor day as 2. Only the trailing position
+# is corrected — an ``F`` between digits is not a 7, and a count is the last
+# number on its line.
+_TRAILING_SEVEN_GLYPHS = "/|\\Ff"
 
 # What `parse_ocr_text` puts in a row's `confidence`, and what those numbers mean.
 # They describe how legible the line was, not how likely the value is correct.
@@ -666,7 +679,7 @@ def _count_candidates(
         # Tesseract frequently reads a terminal 7 as '/' when it ends a count
         # ("2/" is 27). Only the single-digit form is corrected, and only when
         # no further digit follows: "2/05" is a date fragment, not 27.
-        if len(match.group(1)) == 1 and end < len(line) and line[end] in "/|\\":
+        if len(match.group(1)) == 1 and end < len(line) and line[end] in _TRAILING_SEVEN_GLYPHS:
             if end + 1 >= len(line) or not line[end + 1].isdigit():
                 value = value * 10 + 7
                 corrected = True
@@ -766,27 +779,19 @@ def parse_ocr_text(
     ]
 
 
-def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list[dict[str, Any]]:
-    """POST the image to a configured OCR/vision service and parse its rows."""
-    resp = httpx.post(
-        service_url,
-        files={"file": (filename, content)},
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-    # A service may answer either ``{"rows": [...]}`` or a bare JSON array. The
-    # list case has to be checked *before* calling ``.get`` — the old one-liner
-    # did it inside `get`'s default argument, which is only evaluated for a dict,
-    # so an array body raised AttributeError and the rows were thrown away.
-    if isinstance(payload, dict):
-        raw_rows = payload.get("rows", [])
-    elif isinstance(payload, list):
-        raw_rows = payload
-    else:
-        raw_rows = []
+def _rows_from_items(items: Any) -> list[dict[str, Any]]:
+    """Normalise a service's JSON rows into the preview's row shape.
+
+    Shared by the custom OCR endpoint and the vision model, so a provider's
+    quirks (``quantity``/``count`` for the value, a string for the date) are
+    handled once instead of per provider. A row missing a date or a count is
+    dropped rather than defaulted: an invented row would be committed as real
+    demand.
+    """
     rows: list[dict[str, Any]] = []
-    for idx, item in enumerate(raw_rows):
+    if not isinstance(items, (list, tuple)):
+        return rows
+    for item in items:
         if not isinstance(item, dict):
             continue
         date_raw = item.get("date")
@@ -804,18 +809,140 @@ def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list
             continue
         rows.append(
             {
-                "row_index": idx,
+                "row_index": len(rows),
                 "date": date.isoformat(),
                 "demand_qty": demand_qty,
                 "location": None,
                 "notes": None,
                 "confidence": float(item.get("confidence", 0.9)),
-                # A remote service is not required to report geometry; when it
-                # does not, the review screen simply draws no highlight.
+                # A service is not required to report geometry; when it does
+                # not, the review screen simply draws no highlight.
                 "boxes": None,
             }
         )
     return rows
+
+
+def _extract_via_remote(content: bytes, filename: str, service_url: str) -> list[dict[str, Any]]:
+    """POST the image to a configured OCR/vision service and parse its rows."""
+    resp = httpx.post(
+        service_url,
+        files={"file": (filename, content)},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    # A service may answer either ``{"rows": [...]}`` or a bare JSON array. The
+    # list case has to be checked *before* calling ``.get`` — the old one-liner
+    # did it inside `get`'s default argument, which is only evaluated for a dict,
+    # so an array body raised AttributeError and the rows were thrown away.
+    if isinstance(payload, dict):
+        return _rows_from_items(payload.get("rows", []))
+    return _rows_from_items(payload)
+
+
+# The vision model is asked for this shape, and nothing else. A photo of a
+# handwritten log defeats Tesseract because glyph shapes vary between hands; a
+# vision model reads the page the way a person does, including which count sits
+# beside which date — which is the failure the measured page showed most of.
+_VISION_PROMPT = """You read a photograph of a handwritten visitor log from a restaurant or shop.
+
+Answer with ONE JSON object and nothing else — no prose, no code fences:
+
+{"rows": [{"date": "YYYY-MM-DD", "demand_qty": 0, "confidence": 0.0}]}
+
+Rules:
+- One row per service day actually written on the page.
+- demand_qty is that day's visitor/cover count. It is not a table number, a
+  page number, a running total, or any label.
+- Ignore annotations ("busy", "holiday?", "check", "rain", arrows, ticks) and
+  ignore struck-through or scribbled-over numbers: a correction replaces what
+  was crossed out, so use only the number that stands.
+- A date without a year belongs to %s.
+- Omit rows you cannot read rather than guessing. Do not invent rows, and do
+  not carry a count over from a neighbouring line.
+- confidence is your own 0-1 estimate that the date and count are both right.
+"""
+
+
+def _strip_code_fence(text: str) -> str:
+    """A model's JSON reply with an accidental ```json fence removed."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    body = stripped[3:]
+    if body[:4].lower() == "json":
+        body = body[4:]
+    return body.rsplit("```", 1)[0].strip()
+
+
+def _extract_via_vision(
+    content: bytes,
+    *,
+    url: str,
+    api_key: str | None,
+    model: str,
+    timeout: float,
+    reporting_year: int | None = None,
+) -> list[dict[str, Any]]:
+    """Read the photo with a vision model over the OpenAI chat-completions shape.
+
+    That shape is the widest common denominator for image input: a hosted
+    provider, or a local Ollama server running a vision model, both answer it,
+    so handwriting support does not force either a cloud account or a vendor
+    SDK. The reply is asked for as JSON and parsed defensively — a model that
+    wraps its JSON in prose is a formatting problem, not a failed read.
+
+    Raises:
+        RuntimeError: If the endpoint replies with something that is not a row
+            list, so the caller can fall back and say why.
+    """
+    import base64
+
+    detected = _sniff_image_format(content)
+    mime = image_mime_type(detected)
+    if mime == "application/octet-stream":  # sniffable but outside the MIME map
+        mime = "image/jpeg"
+    data_url = f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+    year = _default_year(reporting_year)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    response = httpx.post(
+        url,
+        headers=headers,
+        json={
+            "model": model,
+            "temperature": 0,
+            "max_tokens": 2000,
+            "messages": [
+                {"role": "system", "content": _VISION_PROMPT % year},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Read this page."},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    try:
+        reply = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"vision reply had no message content ({exc})") from exc
+    if isinstance(reply, list):  # some providers return content parts
+        reply = "".join(part.get("text", "") for part in reply if isinstance(part, dict))
+    try:
+        data = json.loads(_strip_code_fence(str(reply)))
+    except ValueError as exc:
+        raise RuntimeError(f"vision reply was not JSON ({exc})") from exc
+    items = data.get("rows", []) if isinstance(data, dict) else data
+    return _rows_from_items(items)
 
 
 def _page_segmentation_modes() -> list[int]:
@@ -823,9 +950,11 @@ def _page_segmentation_modes() -> list[int]:
 
     ``6`` assumes a uniform block of text and is the best default for a written
     log. ``4`` and ``11`` cover multi-column and sparse layouts; running all
-    three and keeping the best-scoring extraction is a cheap way to be robust to
-    an unfamiliar page without pulling in a layout model. "Best" is decided by
-    :func:`_extraction_score`, not by which mode returned the most rows.
+    three and merging their rows is a cheap way to be robust to an unfamiliar
+    page without pulling in a layout model. Merging rather than ranking matters:
+    two modes on one hand-written page routinely read different halves of it, and
+    :func:`_extraction_score` is only used to choose between the two
+    reconstructions of a single mode.
     """
     raw = str(getattr(get_settings(), "ocr_psm_modes", "6,4,11"))
     modes: list[int] = []
@@ -1131,6 +1260,116 @@ def _extraction_score(
     return (distinct, -duplicates, plausible, mean_confidence or 0.0)
 
 
+@dataclass(frozen=True, slots=True)
+class _Read:
+    """One recogniser's opinion of the page: a layout mode on one image variant."""
+
+    rows: list[dict[str, Any]]
+    source: str  # "lines" (the engine's own lines) or "cells" (grouped by position)
+    variant: str  # "photo" (the prepared page) or "binarised" (a thresholded copy)
+    psm: int
+    mean_confidence: float | None
+
+
+def _merge_reads(reads: list[_Read]) -> tuple[list[dict[str, Any]], int]:
+    """One row per service day, chosen by how many independent reads agree.
+
+    Ranking reads and keeping the winner was losing rows that had already been
+    read. On a measured page of twenty-one hand-written days, block mode
+    recovered days 1-3 and 8 while sparse mode recovered days 4, 5 and 12-15 —
+    nearly disjoint sets, and only one of them survived — so merging is the
+    extraction, not a tie-break.
+
+    Reads are compared by date because that is the key the import commits on:
+    two reads of one day are two opinions about one record, not two records.
+    The value most reads agree on wins, and an outright tie goes to the value
+    the more confident reads produced, since a clean read of a blurred page is
+    stronger evidence than a strained one. A row keeps the boxes of the read
+    that produced it, so the review screen highlights the ink it came from.
+
+    Returns the merged rows and how many dates the reads disagreed on — the
+    operator is asked to check every row anyway, and a date the recognisers
+    argued about is the one worth checking first.
+
+    Each merged row carries that doubt itself: ``readers`` is how many reads
+    produced a row for that date at all, and ``agreement`` is the share of those
+    reads that produced the value kept (1.0 = every read that found the day
+    agreed). A row's ``confidence`` cannot say this — it describes how legible
+    that read's line was — so evidence about the record is reported separately
+    rather than folded into a number that already has a meaning.
+    """
+    votes: dict[str, list[tuple[dict[str, Any], _Read]]] = {}
+    for read in reads:
+        already_voted: set[str] = set()
+        for row in read.rows:
+            date = str(row.get("date"))
+            if not date or date in already_voted:
+                # One read gets one vote per date, however many times it split it.
+                continue
+            already_voted.add(date)
+            votes.setdefault(date, []).append((row, read))
+
+    merged: list[dict[str, Any]] = []
+    disagreements = 0
+    for date in sorted(votes):
+        by_value: dict[int, list[tuple[dict[str, Any], _Read]]] = {}
+        for row, read in votes[date]:
+            by_value.setdefault(int(row.get("demand_qty") or 0), []).append((row, read))
+        if len(by_value) > 1:
+            disagreements += 1
+        # `max` keeps the first of equal candidates, so the read order above is
+        # the final tie-break: deterministic rather than arbitrary.
+        _, group = max(
+            by_value.items(),
+            key=lambda item: (
+                len(item[1]),
+                sum(read.mean_confidence or 0.0 for _, read in item[1]),
+            ),
+        )
+        row = dict(group[0][0])
+        row["row_index"] = len(merged)
+        row["readers"] = len(votes[date])
+        row["agreement"] = round(len(group) / len(votes[date]), 2)
+        merged.append(row)
+    return merged, disagreements
+
+
+def _binarise(gray: Any) -> Any:
+    """A thresholded copy of the prepared page, read as a second opinion.
+
+    The prepared image deliberately keeps mid-grey strokes — binarising a
+    hand-written 7 can flatten it into a 1 (see :func:`_flatten_illumination`).
+    On a creased or stained photo that same softness lets a shadow merge with
+    ink, and a hard threshold at Otsu's cut is a genuinely different view of the
+    page: on a measured photo it read nine days where the grey copy read seven.
+
+    Otsu's cut maximises the variance between the dark and light classes, so it
+    follows the photo's own exposure instead of a fixed level that would blank a
+    dim page. Geometry is untouched, so a box still maps onto the upload.
+    """
+    histogram = gray.histogram()
+    total = sum(histogram)
+    if not total:
+        return gray
+    sum_all = sum(level * count for level, count in enumerate(histogram))
+    sum_dark = weight_dark = 0
+    best_variance, threshold = -1.0, 128
+    for level, count in enumerate(histogram):
+        weight_dark += count
+        if not weight_dark:
+            continue
+        weight_light = total - weight_dark
+        if not weight_light:
+            break
+        sum_dark += level * count
+        mean_dark = sum_dark / weight_dark
+        mean_light = (sum_all - sum_dark) / weight_light
+        variance = weight_dark * weight_light * (mean_dark - mean_light) ** 2
+        if variance > best_variance:
+            best_variance, threshold = variance, level
+    return gray.point(lambda value: 255 if value > threshold else 0, mode="L")
+
+
 def _tesseract_extraction(
     content: bytes, language: str, *, reporting_year: int | None = None
 ) -> ImageExtraction:
@@ -1147,75 +1386,102 @@ def _tesseract_extraction(
 
     image, prep = _preprocess(content)
     timeout = float(getattr(get_settings(), "ocr_timeout_seconds", 30.0))
-    best: ImageExtraction | None = None
-    best_score: tuple[int, int, int, float] | None = None
+    reads: list[_Read] = []
     failures: list[str] = []
+    binarised = None
 
     for psm in _page_segmentation_modes():
-        try:
-            text = pytesseract.image_to_string(
-                image, lang=language, config=f"--psm {psm}", timeout=timeout
+        for variant in ("photo", "binarised"):
+            # The thresholded copy is only worth reading where this mode already
+            # found something on the photo: a mode that read nothing has no
+            # rows to gain, and the extra pass costs real time.
+            if variant == "binarised" and not any(read.psm == psm for read in reads):
+                continue
+            if variant == "binarised":
+                binarised = binarised if binarised is not None else _binarise(image)
+            page = image if variant == "photo" else binarised
+
+            try:
+                text = pytesseract.image_to_string(
+                    page, lang=language, config=f"--psm {psm}", timeout=timeout
+                )
+            except TypeError:  # pytesseract < 0.3.10 has no timeout parameter
+                text = pytesseract.image_to_string(page, lang=language, config=f"--psm {psm}")
+            except Exception as exc:  # a failed pass must not discard the others
+                failures.append(f"psm {psm} ({variant}): {exc}")
+                continue
+
+            day_first = _infer_day_first(text)
+            parsed = _parse_lines(
+                text.splitlines(), day_first=day_first, reporting_year=reporting_year
             )
-        except TypeError:  # pytesseract < 0.3.10 has no timeout parameter
-            text = pytesseract.image_to_string(image, lang=language, config=f"--psm {psm}")
-        except Exception as exc:  # a failed mode must not discard the others
-            failures.append(f"psm {psm}: {exc}")
-            continue
+            line_rows = [row.as_row(index) for index, row in enumerate(parsed)]
+            try:
+                word_data: _WordData | None = _read_word_data(page, language, psm, timeout)
+            except Exception:  # geometry is an aid, not a requirement
+                word_data = None
 
-        day_first = _infer_day_first(text)
-        parsed = _parse_lines(text.splitlines(), day_first=day_first, reporting_year=reporting_year)
-        line_rows = [row.as_row(index) for index, row in enumerate(parsed)]
-        try:
-            word_data: _WordData | None = _read_word_data(image, language, psm, timeout)
-        except Exception:  # geometry is an aid, not a requirement
-            word_data = None
+            mean_confidence = word_data.mean_confidence if word_data else None
+            rows, row_source = line_rows, "lines"
+            if word_data is not None:
+                if line_rows:
+                    _attach_boxes(parsed, line_rows, word_data.by_line, prep)
+                # A sheet read column-by-column has every date in one engine line
+                # and every count in another, so the line parser sees two halves
+                # it cannot join. Re-grouping by position recovers those pairs; it
+                # is only taken when it explains more of the page than the lines.
+                cell_rows = _cells_extraction(
+                    word_data.words, prep, day_first=day_first, reporting_year=reporting_year
+                )
+                if _extraction_score(cell_rows, mean_confidence) > _extraction_score(
+                    line_rows, mean_confidence
+                ):
+                    rows, row_source = cell_rows, "cells"
 
-        mean_confidence = word_data.mean_confidence if word_data else None
-        rows, row_source = line_rows, "lines"
-        if word_data is not None:
-            if line_rows:
-                _attach_boxes(parsed, line_rows, word_data.by_line, prep)
-            # A sheet read column-by-column has every date in one engine line and
-            # every count in another, so the line parser sees two halves it
-            # cannot join. Re-grouping by position recovers those pairs; it is
-            # only taken when it explains more of the page than the lines did.
-            cell_rows = _cells_extraction(
-                word_data.words, prep, day_first=day_first, reporting_year=reporting_year
+            if not rows:
+                continue
+            reads.append(
+                _Read(
+                    rows=rows,
+                    source=row_source,
+                    variant=variant,
+                    psm=psm,
+                    mean_confidence=mean_confidence,
+                )
             )
-            if _extraction_score(cell_rows, mean_confidence) > _extraction_score(
-                line_rows, mean_confidence
-            ):
-                rows, row_source = cell_rows, "cells"
 
-        if not rows:
-            continue
-        score = _extraction_score(rows, mean_confidence)
-        candidate = ImageExtraction(
-            rows=rows,
+    if not reads:
+        # Nothing was read. Raise only when the engine itself failed, so the
+        # caller can distinguish "no engine" from "no readable rows".
+        if failures:
+            raise RuntimeError("; ".join(failures))
+        return ImageExtraction(
+            rows=[],
             engine=ENGINE_TESSERACT,
-            quality={
-                "page_segmentation_mode": psm,
-                "mean_confidence": mean_confidence,
-                "rows": len(rows),
-                "distinct_dates": score[0],
-                "duplicate_dates": -score[1],
-                # Which reconstruction produced the rows: `lines` (the engine's
-                # own lines) or `cells` (regrouped by position).
-                "row_source": row_source,
-            },
+            detail="No readable rows were found in this photo.",
+            quality={"page_segmentation_modes": _page_segmentation_modes(), "rows": 0},
         )
-        if best is None or best_score is None or score > best_score:
-            best, best_score = candidate, score
 
-    if best is not None:
-        return best
-    if failures:
-        raise RuntimeError("; ".join(failures))
+    rows, disagreements = _merge_reads(reads)
+    anchor = max(reads, key=lambda read: (len(read.rows), read.mean_confidence or 0.0))
     return ImageExtraction(
-        rows=[],
+        rows=rows,
         engine=ENGINE_TESSERACT,
-        detail="No readable rows were found in this photo.",
-        quality={"page_segmentation_modes": _page_segmentation_modes(), "rows": 0},
+        quality={
+            # The mode and reconstruction that explained most of the page. Rows
+            # may come from other reads too — `reads` and `variants` say how many
+            # opinions were merged, and `read_disagreements` how many days they
+            # argued over.
+            "page_segmentation_mode": anchor.psm,
+            "row_source": anchor.source,
+            "mean_confidence": anchor.mean_confidence,
+            "rows": len(rows),
+            "distinct_dates": len(rows),
+            "duplicate_dates": 0,
+            "reads": len(reads),
+            "variants": sorted({read.variant for read in reads}),
+            "read_disagreements": disagreements,
+        },
     )
 
 
@@ -1248,9 +1514,14 @@ def extract_rows_with_engine(
 ) -> ImageExtraction:
     """Extract candidate demand rows from an image, using the best engine.
 
-    Tries the configured remote service, then local Tesseract, and otherwise
-    returns no rows (never fabricated ones). Engine failures are logged and
-    degrade to an empty extraction so the operator can still type rows in.
+    Tries the configured remote service, then a configured vision model, then
+    local Tesseract, and otherwise returns no rows (never fabricated ones).
+    Engine failures are logged and degrade to an empty extraction so the
+    operator can still type rows in.
+
+    The order is deliberate: a photo of handwriting is the case the local engine
+    cannot read, so any service that can is preferred, and Tesseract remains the
+    free offline fallback for a printed sheet.
 
     ``reporting_year`` is applied to dates the sheet writes without a year. It
     only affects the local parser: a remote service returns its own dates, read
@@ -1265,6 +1536,10 @@ def extract_rows_with_engine(
     """
     settings = get_settings()
     service_url = getattr(settings, "ocr_service_url", None)
+    vision_url = getattr(settings, "ocr_vision_url", None)
+    # Whichever configured service failed, so a fallback that also comes back
+    # empty can say why instead of reporting a bare "no rows".
+    service_failure: str | None = None
 
     if service_url:
         try:
@@ -1277,13 +1552,46 @@ def extract_rows_with_engine(
                 quality={
                     "mean_confidence": round(sum(scored) / len(scored), 4) if scored else None,
                     "rows": len(rows),
+                    "provider": "custom",
                 },
             )
         except Exception as exc:
             logger.warning("remote OCR service failed for %s", filename, exc_info=True)
-            remote_failure = str(exc) or exc.__class__.__name__
-    else:
-        remote_failure = None
+            service_failure = str(exc) or exc.__class__.__name__
+
+    if vision_url:
+        try:
+            vision_rows = _extract_via_vision(
+                content,
+                url=vision_url,
+                api_key=getattr(settings, "ocr_vision_api_key", None),
+                model=getattr(settings, "ocr_vision_model", "gpt-4o-mini"),
+                timeout=float(getattr(settings, "ocr_vision_timeout_seconds", 90.0)),
+                reporting_year=reporting_year,
+            )
+            # A model that answers with nothing is a failed read, not an empty
+            # page: fall through to the local engine and let the highest-recall
+            # answer win, rather than reporting zero rows on the strength of one
+            # refusal.
+            if vision_rows:
+                logger.info("vision OCR extracted %s rows from %s", len(vision_rows), filename)
+                scored = [
+                    float(r["confidence"]) for r in vision_rows if r.get("confidence") is not None
+                ]
+                return ImageExtraction(
+                    rows=vision_rows,
+                    engine=ENGINE_REMOTE,
+                    quality={
+                        "mean_confidence": round(sum(scored) / len(scored), 4) if scored else None,
+                        "rows": len(vision_rows),
+                        "provider": "vision",
+                        "model": getattr(settings, "ocr_vision_model", None),
+                    },
+                )
+            logger.info("vision OCR read no rows from %s; trying the local engine", filename)
+        except Exception as exc:
+            logger.warning("vision OCR failed for %s", filename, exc_info=True)
+            service_failure = str(exc) or exc.__class__.__name__
 
     try:
         extraction = _tesseract_extraction(
@@ -1294,21 +1602,24 @@ def extract_rows_with_engine(
     except ImportError:
         logger.info(
             "OCR engine not installed. No rows extracted from %s "
-            "(install 'demandiq-backend[ocr]' or set OCR_SERVICE_URL)",
+            "(install 'demandiq-backend[ocr]', or set OCR_SERVICE_URL / OCR_VISION_URL)",
             filename,
         )
-        if remote_failure is not None:
+        if service_failure is not None:
             return ImageExtraction(
                 rows=[],
                 engine=ENGINE_NONE,
-                detail=f"The OCR service could not be reached ({remote_failure}) and no local engine is installed.",
+                detail=f"The OCR service could not be reached ({service_failure}) and no local engine is installed.",
             )
         return ImageExtraction(rows=[], engine=ENGINE_NONE, detail="No OCR engine is configured.")
     except Exception as exc:
         logger.warning("local OCR failed for %s", filename, exc_info=True)
         detail = f"Local OCR failed ({str(exc) or exc.__class__.__name__})."
-        if remote_failure is not None:
-            detail = f"The OCR service could not be reached ({remote_failure}) and {detail[0].lower()}{detail[1:]}"
+        if service_failure is not None:
+            detail = (
+                f"The OCR service could not be reached ({service_failure}) and "
+                f"{detail[0].lower()}{detail[1:]}"
+            )
         return ImageExtraction(rows=[], engine=ENGINE_NONE, detail=detail)
 
 

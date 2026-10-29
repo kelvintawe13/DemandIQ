@@ -87,7 +87,7 @@ export function LegalProvider({ children }: {children: React.ReactNode;}) {
       <ConsentBanner
         open={promptOpen && !docId}
         onDecide={decide}
-        onReadPolicy={() => setDocId('cookies')}
+        onReadPolicy={() => setDocId('privacy')}
         onDismiss={() => setPromptOpen(false)}
         current={consent} />
       

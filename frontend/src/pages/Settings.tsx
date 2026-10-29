@@ -1104,9 +1104,7 @@ export function Settings({ initialTab }: SettingsProps) {
                     </button>
                     {(
                   [
-                  ['Privacy Policy', 'privacy'],
-                  ['Terms of Service', 'terms'],
-                  ['Cookie Policy', 'cookies']] as
+                  ['Privacy & Terms', 'privacy']] as
                   const).
                   map(([label, id]) =>
                   <button

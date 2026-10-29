@@ -154,3 +154,66 @@ describe('OCR row scores', () => {
     );
   });
 });
+
+/**
+ * The local engine reads a page several ways and merges the results, so a row's
+ * figure can be a consensus or a majority. That is a different claim from the
+ * per-row `confidence` pill — which describes one read's line — and the screen
+ * has to say so, and put the doubtful rows where the operator meets them first.
+ */
+describe('OCR readings', () => {
+  const contested = { row_index: 0, date: '2026-10-15', demand_qty: 24, confidence: 0.9, readers: 3, agreement: 0.67 };
+  const unanimous = { row_index: 1, date: '2026-10-02', demand_qty: 28, confidence: 0.9, readers: 3, agreement: 1 };
+  const singleRead = { row_index: 2, date: '2026-10-07', demand_qty: 38, confidence: 0.9, readers: 1, agreement: 1 };
+
+  it('names the split and lists the disputed rows first', async () => {
+    // The disputed row is served last, so its position at the top can only come
+    // from the panel's ordering.
+    serveJob('tesseract', [unanimous, singleRead, contested]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await waitFor(() => expect(screen.getByText('2 of 3 readings agree')).toBeInTheDocument());
+
+    const dateFields = screen.getAllByLabelText(/Date for row \d+/);
+    expect(dateFields.map((field) => (field as HTMLInputElement).value)).toEqual([
+      '2026-10-15',
+      '2026-10-02',
+      '2026-10-07',
+    ]);
+
+    // A row only one read produced is not a dispute, and must not be labelled as
+    // one — a badge on every row trains the operator to ignore badges.
+    expect(screen.getAllByText(/readings agree/)).toHaveLength(1);
+  });
+
+  it('summarises the disputed rows without claiming they are certain', async () => {
+    serveJob('tesseract', [contested, unanimous]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await waitFor(() =>
+      expect(screen.getByText('1 row the readings disagreed on')).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/majority reading rather than a unanimous one/)).toBeInTheDocument();
+  });
+
+  it('stays quiet for a row whose readings all agreed', async () => {
+    serveJob('tesseract', [unanimous]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await screen.findByText('One number on the line');
+    expect(screen.queryByText(/readings agree/)).toBeNull();
+    expect(screen.queryByText(/readings disagreed/)).toBeNull();
+  });
+
+  it('leaves a vision model score to speak for itself', async () => {
+    // A remote service returns one read of the page: there is no merge to report,
+    // so no agreement is invented for it.
+    serveJob('remote', [
+      { row_index: 0, date: '2026-10-15', demand_qty: 24, confidence: 0.93 },
+    ]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await waitFor(() => expect(screen.getByText('93% model score')).toBeInTheDocument());
+    expect(screen.queryByText(/readings agree/)).toBeNull();
+  });
+});

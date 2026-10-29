@@ -501,18 +501,10 @@ export function SignUp({ onNavigateAuth, onSignIn, onCompleteProfile }: SignUpPr
                 I agree to the{' '}
                 <button
                 type="button"
-                onClick={() => openLegal('terms')}
-                className="rounded font-medium text-brand-700 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
-                
-                  Terms of Service
-                </button>{' '}
-                and{' '}
-                <button
-                type="button"
                 onClick={() => openLegal('privacy')}
                 className="rounded font-medium text-brand-700 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
                 
-                  Privacy Policy
+                  Privacy Policy and Terms of Use
                 </button>
               </span>
             </label>

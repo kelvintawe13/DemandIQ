@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -131,7 +132,24 @@ def _get_or_create_subscription(db: Session, workspace_id: uuid.UUID) -> Billing
             updated_at=now,
         )
         db.add(sub)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # Billing fires /subscription, /invoices and /usage together on the
+            # first visit to the screen, so several requests can find no row and
+            # all try to provision one. The unique index on workspace_id picks a
+            # winner and every other request would 500 on the duplicate insert.
+            # Postgres blocks the losing INSERT until the winner's transaction
+            # ends, so by the time this fires the row is committed and readable.
+            db.rollback()
+            existing = db.scalar(
+                select(BillingSubscription).where(
+                    BillingSubscription.workspace_id == workspace_id
+                )
+            )
+            if existing is None:
+                raise
+            return existing
         # Derive per-plan price from PLANS (not hard-coded 4800000) for future-proofing
         _growth_cents = next((p["price_cents"] for p in PLANS if p["id"] == "growth"), 4800000) or 0
         # Seed 4 invoices for demo (Jun-Sep 2026)

@@ -247,8 +247,22 @@ hand-written `98` into `9` and `134` into `434`.
 
 Handwriting remains the weak case: jittered glyphs still misread digits (a
 `2025` came back `2925` in one sample), which is why every row carries its own
-readability score and the review screen asks for confirmation. `OCR_SERVICE_URL`
-remains the route to a real handwriting model.
+readability score and the review screen asks for confirmation.
+
+The local engine now reads each page several ways and merges the results instead
+of keeping the best one — every layout mode, plus a binarised copy of any mode
+that found something, matched up by date and decided by agreement. On a photo of
+a hand-written log that took it from **7 rows, 4 of them right** to **13 rows,
+10 right**; the days it still misses are ones no mode recognised at all. That
+ceiling is Tesseract's, not the parser's: `OCR_VISION_URL` sends the photo to a
+vision model instead, which is the route to real handwriting accuracy.
+
+Because the figure can be a consensus or a majority, each merged row carries
+`readers` and `agreement`, and the review list puts the disputed rows first with
+the split spelled out ("2 of 3 readings agree"). That is evidence about the
+*record*; the pill beside it is the old per-row line legibility. Only disputes are
+flagged — a unanimous reading can still be wrong, which is a recognition error no
+amount of voting can reveal, so every row is still confirmed against the photo.
 
 ## The original photo is kept (`../../pages/ImportDemandData.tsx`)
 

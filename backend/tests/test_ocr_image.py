@@ -15,10 +15,15 @@ import pytest
 
 from app.services.ingestion.image import (
     ImageValidationError,
+    _extract_via_vision,
+    _find_date,
+    _merge_reads,
     _page_segmentation_modes,
     _prepare_image,
     _preprocess,
+    _Read,
     _tesseract_extraction,
+    extract_rows_with_engine,
     validate_image_upload,
 )
 
@@ -338,3 +343,309 @@ def test_real_tesseract_reads_a_rendered_log() -> None:
         assert 0.0 <= left < 1.0 and 0.0 <= top < 1.0
         assert 0.0 < width <= 1.0 and 0.0 < height <= 1.0
     assert date_box[0] < count_box[0]
+
+
+def test_a_letter_read_as_a_day_does_not_discard_the_page() -> None:
+    """One unreadable glyph must not cost the whole photo.
+
+    Tesseract reads a handwritten 1 as `l`, `I`, `|` or `L`. The month-first
+    pattern matches all four (it is case-insensitive), but the substitution only
+    covered the lower-case forms, so `Oct L` raised ValueError — and that
+    escaped the page, so a twenty-one-row photo came back with no rows at all.
+    """
+    date, span = _find_date("blank sheet spilled Oct L", day_first=True, reporting_year=2026)
+    assert date is not None and date.isoformat() == "2026-10-01"
+    assert span is not None
+
+    # Still no date when the glyph is genuinely not a digit, but no exception.
+    assert _find_date("Oct Z 12", day_first=True, reporting_year=2026)[0] is None
+
+
+def _read(date: str, qty: int, *, psm: int = 6, conf: float = 0.6, variant: str = "photo"):
+    row = {
+        "row_index": 0,
+        "date": date,
+        "demand_qty": qty,
+        "location": None,
+        "notes": None,
+        "confidence": 0.9,
+        "boxes": {"date": None, "demand_qty": None},
+    }
+    return _Read(rows=[row], source="lines", variant=variant, psm=psm, mean_confidence=conf)
+
+
+def test_reads_of_different_modes_are_merged_not_ranked() -> None:
+    """Two modes that read different halves of a page both contribute.
+
+    Keeping only the best-scoring extraction was the bug: on a measured page of
+    twenty-one hand-written days, block mode recovered days 1-3 and 8 while
+    sparse mode recovered 4, 5 and 12-15 — nearly disjoint sets — and the other
+    half was thrown away even though it had already been read correctly.
+    """
+    reads = [
+        _read("2026-10-01", 34, psm=6),
+        _read("2026-10-02", 28, psm=6),
+        _read("2026-10-04", 50, psm=11, conf=0.77),
+        _read("2026-10-05", 32, psm=11, conf=0.77),
+    ]
+
+    rows, disagreements = _merge_reads(reads)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [
+        ("2026-10-01", 34),
+        ("2026-10-02", 28),
+        ("2026-10-04", 50),
+        ("2026-10-05", 32),
+    ]
+    assert disagreements == 0
+    # Reading order is preserved so the review list follows the page.
+    assert [row["row_index"] for row in rows] == [0, 1, 2, 3]
+
+
+def test_agreeing_reads_outvote_a_single_dissenting_one() -> None:
+    """The value most reads agree on wins, not the first one seen."""
+    reads = [
+        _read("2026-10-13", 40, psm=6, conf=0.55),
+        _read("2026-10-13", 40, psm=11, conf=0.77, variant="binarised"),
+        _read("2026-10-13", 34, psm=4, conf=0.90),
+    ]
+
+    rows, disagreements = _merge_reads(reads)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [("2026-10-13", 40)]
+    # The screen is told a day was argued over: that is the row worth re-reading.
+    assert disagreements == 1
+
+
+def test_a_tie_goes_to_the_more_confident_read() -> None:
+    """One read each way is settled by how well each read saw the page."""
+    reads = [
+        _read("2026-10-05", 29, psm=6, conf=0.55),
+        _read("2026-10-05", 32, psm=11, conf=0.77),
+    ]
+
+    rows, _ = _merge_reads(reads)
+
+    assert rows[0]["demand_qty"] == 32
+
+
+def test_one_read_counts_once_per_date() -> None:
+    """A mode that split one day into two rows does not outvote the others."""
+    split = _read("2026-10-13", 34, psm=11, conf=0.77)
+    split = _Read(
+        rows=[*split.rows, {**split.rows[0], "demand_qty": 40, "row_index": 1}],
+        source=split.source,
+        variant=split.variant,
+        psm=split.psm,
+        mean_confidence=split.mean_confidence,
+    )
+    reads = [split, _read("2026-10-13", 40, psm=6, conf=0.55)]
+
+    rows, _ = _merge_reads(reads)
+
+    # 34 and 40 hold one vote each, so the tie-break decides it and the more
+    # confident read wins. Counting the duplicate would have handed 40 two votes
+    # and the election — one read cannot outvote itself.
+    assert [row["demand_qty"] for row in rows] == [34]
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+def test_vision_request_carries_the_photo_and_asks_for_json(monkeypatch) -> None:
+    """The vision call is the OpenAI-shaped one, with the year in the prompt.
+
+    Handwriting is the case the local engine cannot read, so this request is the
+    one that has to work on a real provider. Pinned here: the image travels as a
+    base64 data URL (not multipart, which is the *custom* service's shape), the
+    model and key are passed through, and the yearless-date instruction is the
+    operator's reporting year rather than the current one.
+    """
+    captured: dict = {}
+
+    def fake_post(url, *, headers=None, json=None, timeout=None):
+        captured.update(url=url, headers=headers, body=json, timeout=timeout)
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"rows": [{"date": "2026-10-01",'
+                            ' "demand_qty": 34, "confidence": 0.93}]}\n```'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.services.ingestion.image.httpx.post", fake_post)
+
+    rows = _extract_via_vision(
+        _ONE_PIXEL_PNG,
+        url="http://vision.test/v1/chat/completions",
+        api_key="secret-key",
+        model="a-vision-model",
+        timeout=42.0,
+        reporting_year=2026,
+    )
+
+    assert captured["url"] == "http://vision.test/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert captured["timeout"] == 42.0
+    assert captured["body"]["model"] == "a-vision-model"
+    prompt = captured["body"]["messages"][0]["content"]
+    assert "2026" in prompt
+    # The photo is one message's image part, inline rather than multipart.
+    image_part = captured["body"]["messages"][1]["content"][1]
+    assert image_part["type"] == "image_url"
+    assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
+
+    # A fenced JSON reply is a formatting habit, not a failed read.
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [("2026-10-01", 34)]
+    assert rows[0]["confidence"] == 0.93
+    # One model read means no merge, so no agreement is invented for it.
+    assert "agreement" not in rows[0] and "readers" not in rows[0]
+
+
+def test_a_vision_reply_that_is_not_json_fails_loudly(monkeypatch) -> None:
+    """The caller must be able to fall back and say why, not get silent zeroes."""
+    monkeypatch.setattr(
+        "app.services.ingestion.image.httpx.post",
+        lambda *a, **k: _FakeResponse(
+            {"choices": [{"message": {"content": "I cannot read this."}}]}
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="not JSON"):
+        _extract_via_vision(
+            _ONE_PIXEL_PNG,
+            url="http://vision.test/v1/chat/completions",
+            api_key=None,
+            model="m",
+            timeout=5.0,
+        )
+
+
+def test_a_configured_vision_model_is_used_before_the_local_engine(monkeypatch) -> None:
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ocr_service_url", None)
+    monkeypatch.setattr(settings, "ocr_vision_url", "http://vision.test/v1/chat/completions")
+    monkeypatch.setattr(settings, "ocr_vision_model", "a-vision-model")
+    monkeypatch.setattr(
+        "app.services.ingestion.image.httpx.post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "choices": [
+                    {"message": {"content": '{"rows": [{"date": "2026-10-01", "demand_qty": 34}]}'}}
+                ]
+            }
+        ),
+    )
+
+    extraction = extract_rows_with_engine(_ONE_PIXEL_PNG, "log.png", reporting_year=2026)
+
+    assert extraction.engine == "remote"
+    assert extraction.quality["provider"] == "vision"
+    assert [row["demand_qty"] for row in extraction.rows] == [34]
+
+
+def test_a_vision_read_that_finds_nothing_falls_back_to_the_local_engine(monkeypatch) -> None:
+    """An empty model answer is a failed read, not an empty page.
+
+    Reporting zero rows on the strength of one refusal would tell the operator
+    there is nothing on the photo while the local engine might have read most of
+    it, so the fallback still runs.
+    """
+    pytest.importorskip("PIL")
+    from app.config import get_settings
+    from app.services.ingestion import image as image_module
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ocr_service_url", None)
+    monkeypatch.setattr(settings, "ocr_vision_url", "http://vision.test/v1/chat/completions")
+    monkeypatch.setattr(
+        "app.services.ingestion.image.httpx.post",
+        lambda *a, **k: _FakeResponse({"choices": [{"message": {"content": '{"rows": []}'}}]}),
+    )
+
+    local = image_module.ImageExtraction(
+        rows=[
+            {
+                "row_index": 0,
+                "date": "2026-10-02",
+                "demand_qty": 28,
+                "location": None,
+                "notes": None,
+                "confidence": 0.9,
+                "boxes": {"date": None, "demand_qty": None},
+            }
+        ],
+        engine="tesseract",
+        quality={"rows": 1},
+    )
+    monkeypatch.setattr(image_module, "_tesseract_extraction", lambda *a, **k: local)
+
+    extraction = extract_rows_with_engine(_ONE_PIXEL_PNG, "log.png", reporting_year=2026)
+
+    assert extraction.engine == "tesseract"
+    assert [row["demand_qty"] for row in extraction.rows] == [28]
+
+
+def test_a_disputed_row_carries_its_vote_split() -> None:
+    """The row says how much of the evidence backed it, not just that it won.
+
+    The review screen lists these first, so the counts have to be the real ones:
+    three reads found the day, two produced the figure kept.
+    """
+    reads = [
+        _read("2026-10-15", 24, psm=6, conf=0.55),
+        _read("2026-10-15", 24, psm=11, conf=0.77, variant="binarised"),
+        _read("2026-10-15", 29, psm=4, conf=0.60),
+    ]
+
+    rows, _ = _merge_reads(reads)
+
+    assert rows[0]["readers"] == 3
+    assert rows[0]["agreement"] == 0.67
+
+
+def test_an_agreed_row_reports_unanimity() -> None:
+    reads = [
+        _read("2026-10-02", 28, psm=6, conf=0.55),
+        _read("2026-10-02", 28, psm=11, conf=0.77),
+    ]
+
+    rows, disagreements = _merge_reads(reads)
+
+    assert (rows[0]["readers"], rows[0]["agreement"]) == (2, 1.0)
+    assert disagreements == 0
+
+
+def test_a_trailing_seven_read_as_a_letter_is_still_a_seven() -> None:
+    """`27` read back as `2F` must import 27, not 2.
+
+    On a measured hand-written page the day of 27 visitors was transcribed as
+    `2F`: the engine read the 7's top bar as a letter. The parser took the digit
+    it could see and staged that day as 2 visitors — a row the operator has no
+    reason to question, because nothing about it looks wrong.
+    """
+    from app.services.ingestion.image import parse_ocr_text
+
+    rows = parse_ocr_text("8 Oct  2F", day_first=True, reporting_year=2026)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [("2026-10-08", 27)]
+    # A correction is a guess enumerated for the operator, like an ambiguous line.
+    assert rows[0]["confidence"] == 0.75
+
+    # Not a licence to glue an F onto a digit mid-token or to a real unit.
+    assert parse_ocr_text("8 Oct  F2", day_first=True, reporting_year=2026)[0]["demand_qty"] == 2

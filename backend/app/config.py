@@ -103,15 +103,50 @@ class Settings(BaseSettings):
             "Tesseract is used if installed."
         ),
     )
+    ocr_vision_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional vision-model endpoint for photos of handwritten logs, in the "
+            "OpenAI chat-completions shape (POST JSON with `model`, `messages`, an "
+            "image_url content part, and a JSON reply). Any provider offering that "
+            "shape works, including a local Ollama/Qwen-VL server, so handwriting "
+            "does not require a cloud account. Unset = local Tesseract only."
+        ),
+    )
+    ocr_vision_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token sent to OCR_VISION_URL when set. Leave unset for a local "
+            "endpoint that needs no authentication."
+        ),
+    )
+    ocr_vision_model: str = Field(
+        default="gpt-4o-mini",
+        description=(
+            "Model name passed to OCR_VISION_URL. It must accept images and be able "
+            "to answer with JSON — a photograph of handwriting is what Tesseract "
+            "cannot read, so a print-only model defeats the purpose."
+        ),
+    )
+    ocr_vision_timeout_seconds: float = Field(
+        default=90.0,
+        gt=0,
+        le=600,
+        description=(
+            "Timeout for one OCR_VISION_URL call. A vision model reading a whole "
+            "page is slower than Tesseract, and cutting it off mid-read costs the "
+            "rows a retry would have returned."
+        ),
+    )
     ocr_language: str = Field(default="eng", description="Tesseract language pack for local OCR")
     ocr_psm_modes: str = Field(
         default="6,4,11",
         description=(
             "Comma-separated Tesseract page-segmentation modes to try, in order "
-            "(6 = uniform block, 4 = columns, 11 = sparse text). The best-scoring "
-            "extraction wins — distinct dates, then fewest duplicate dates, then "
-            "plausible counts, then word confidence — not simply the most rows. "
-            "A mode that fails is skipped."
+            "(6 = uniform block, 4 = columns, 11 = sparse text). Each mode is an "
+            "independent read and their rows are merged, because two modes on one "
+            "handwritten page routinely read different halves of it. A mode that "
+            "fails is skipped."
         ),
     )
     ocr_max_pixels: int = Field(

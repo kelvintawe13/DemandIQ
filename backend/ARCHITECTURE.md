@@ -30,7 +30,7 @@ this backend today**, and all five resolve to the same row:
 | --- | --- | --- |
 | Manual entry | `POST /ingest/manual` | Validated row by row; a bad row is reported with its index and the good rows still commit |
 | Spreadsheet | Upload (`POST /ingest/file`) | Sniff delimiter and encoding, find the header under title/date-range lines, skip `TOTAL`/blank/`n/a` furniture, apply the user's column mapping |
-| Photo | Upload (`POST /ingest/image`) | Validate and decode, flatten the lighting, deskew, read candidate rows with the remote service or local Tesseract (re-grouping words into rows when a column-wise read split the dates from their counts), always human-confirmed before commit |
+| Photo | Upload (`POST /ingest/image`) | Validate and decode, flatten the lighting, deskew, read candidate rows with the configured service, a vision model, or local Tesseract (merging several layout modes and re-grouping words into rows when a column-wise read split the dates from their counts), always human-confirmed before commit |
 | Enrolled till | `POST /devices/{id}/demand` with `X-Device-Key` | Workspace and location come from the device credential, never from the request body |
 | POS / MoMo connector | Polling pull (`POST /connectors/{id}/pull`) and the queued sync job | Map provider fields onto the canonical four through a stored `ConnectorMapping`, coercing types |
 
@@ -216,3 +216,23 @@ against any marked box, and seconds per page. `--self-check` renders printed
 pages and scores them, which proves the harness is wired correctly — it is not a
 claim about handwriting, and the only meaningful number comes from verified
 photos of real sheets.
+
+### Which engine reads the page
+
+`OCR_SERVICE_URL` (a custom service, multipart upload) and `OCR_VISION_URL` (an
+OpenAI-shaped chat-completions endpoint, image inline) are both tried before the
+local engine, and the local engine runs as the fallback when either fails or
+returns nothing. A vision model is the only one of the three that can read
+handwriting: on one measured photo of a hand-written log, Tesseract combined
+every layout mode and every preprocessing variant and still recovered 10 of 21
+days, with 3 of those counts attached to the wrong day — its glyph models are
+trained on print. Run `scripts/ocr_accuracy.py` against the same photos to check
+that claim on your own sheets rather than relying on this note.
+
+The local engine merges rather than ranks: each page-segmentation mode reads the
+photo, and any mode that found something also reads a binarised copy at Otsu's
+cut. Rows from all of those reads are matched by date, the value most reads agree
+on wins, and an outright tie goes to the more confident reads. That is not a
+tie-break — two modes on one hand-written sheet routinely read different halves
+of it, so keeping only the best-scoring one discarded rows that were already
+read correctly.

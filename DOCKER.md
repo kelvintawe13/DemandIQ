@@ -207,6 +207,27 @@ an installed language pack; the default `eng` is installed above.
 bypasses the local binary. Add `model` alongside it for real serving:
 `BACKEND_EXTRAS="ocr model"`.
 
+**Handwriting needs a vision model, not Tesseract.** Tesseract recognises printed
+glyphs; on a measured photo of a hand-written log, merging every layout mode and
+preprocessing variant still recovered only 9 of 21 days. Set `OCR_VISION_URL` to
+an OpenAI-shaped chat-completions endpoint and the image is sent there instead —
+any provider offering that shape works, including a local server:
+
+```
+OCR_VISION_URL=https://api.openai.com/v1/chat/completions
+OCR_VISION_API_KEY=sk-...
+OCR_VISION_MODEL=gpt-4o-mini
+```
+
+For a local Ollama running a vision model, no key is needed:
+
+```OCR_VISION_URL=http://host.docker.internal:11434/v1/chat/completions
+OCR_VISION_MODEL=qwen2.5vl:7b``
+
+Configured services are tried first and the local engine is the fallback, so a
+provider outage degrades to Tesseract rather than to zero rows. Every photo is
+still human-confirmed in the review screen before it is committed.
+
 Uploads and datasets live in Postgres, not on the container filesystem, so
 neither needs a volume.
 
