@@ -161,7 +161,6 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([]);
   const [forecastsLoading, setForecastsLoading] = useState(true);
   const [forecastsError, setForecastsError] = useState<{ variant: 'error' | 'offline'; message: string; reference?: string | null; status?: number } | null>(null);
-  const [latestForecast, setLatestForecast] = useState<ForecastRecord | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [historical, setHistorical] = useState<Array<{ date: string; demand_qty: number }>>([]);
 
@@ -226,7 +225,6 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
     if (!selectedLocationId) {
       setForecasts([]);
       setForecastsLoading(false);
-      setLatestForecast(null);
       return;
     }
     setForecastsLoading(true);
@@ -238,15 +236,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
         to,
         limit: 50,
       });
-      const data = res.data ?? [];
-      setForecasts(data);
-      if (data.length > 0) {
-        // Assume most recent is first (sorted desc); latest by target_date max
-        const sorted = [...data].sort((a, b) => a.target_date.localeCompare(b.target_date));
-        setLatestForecast(sorted[sorted.length - 1]);
-      } else {
-        setLatestForecast(null);
-      }
+      setForecasts(res.data ?? []);
     } catch (err) {
       if (err instanceof ApiException) {
         if (err.status === 401) {
@@ -303,7 +293,6 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
         granularity: granularityParam,
       });
       const norm = normalizeForecast(res);
-      setLatestForecast(res);
       toast(`Forecast generated for ${selectedLocationName.toLowerCase()}: ${norm.point} covers`);
       // Refresh horizon view
       await fetchForecasts();
@@ -535,7 +524,31 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
     pageSize: 5
   });
 
-  const latestNorm = latestForecast ? normalizeForecast(latestForecast) : null;
+  /*
+    The day this screen is planning for: the same date the calendar card shows
+    and "Generate Forecast" writes. Everything below — KPIs, the preparation
+    comparison, and the "Why this forecast?" panel — describes this one day.
+
+    It used to be the newest row in the loaded window, which reaches 30 days
+    ahead, so the date control and the calendar said 31 Oct while those panels
+    answered for 14 Nov: the same screen showed two different days and neither
+    said which one it was describing. The newest available row is used only when
+    the planning day has no forecast, and every label then names its own date.
+  */
+  const focusDate = addDaysISO(today, 1);
+  const focusForecast = useMemo(() => {
+    if (forecasts.length === 0) return null;
+    const forDay = forecasts.find((row) => normalizeForecast(row).targetDate === focusDate);
+    if (forDay) return forDay;
+    return (
+      [...forecasts]
+        .sort((a, b) =>
+          normalizeForecast(a).targetDate.localeCompare(normalizeForecast(b).targetDate),
+        )
+        .at(-1) ?? null
+    );
+  }, [forecasts, focusDate]);
+  const focusNorm = focusForecast ? normalizeForecast(focusForecast) : null;
 
   const handleLocationApply = (label: string) => {
     // Label may be from legacy modal; try to map to real location name
@@ -571,8 +584,8 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
   // Derived KPI values. Every one of these is `null` when there is nothing to
   // show: a missing forecast used to render an invented "87%", and the "Peak
   // Day" tile actually showed the newest row while claiming to be the busiest.
-  const expectedDemand = latestNorm ? latestNorm.point.toLocaleString('en-US') : '—';
-  const coveragePct = latestNorm ? Math.round((latestNorm.coverage || 0.9) * 100) : null;
+  const expectedDemand = focusNorm ? focusNorm.point.toLocaleString('en-US') : '—';
+  const coveragePct = focusNorm ? Math.round((focusNorm.coverage || 0.9) * 100) : null;
 
   // The busiest day in the window actually loaded, computed from the rows.
   const peak = useMemo(() => {
@@ -582,7 +595,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
       .reduce((busiest, current) => (current.point > busiest.point ? current : busiest));
   }, [forecasts]);
   const peakDayLabel = peak ? shortDay(peak.targetDate) : '—';
-  const latestDayLabel = latestNorm ? shortDay(latestNorm.targetDate) : null;
+  const focusDayLabel = focusNorm ? shortDay(focusNorm.targetDate) : null;
 
   // Who can act on the numbers on this page.
   const canSimulate = permissions.includes('policies:simulate');
@@ -701,12 +714,12 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
           <StatCard
             label="Expected customers"
             value={expectedDemand}
-            sub={latestNorm ? 'for the latest forecast day' : 'generate a forecast to see this'}
+            sub={focusNorm ? `for ${focusDayLabel}` : 'generate a forecast to see this'}
             icon={ArrowUpIcon}
-            tone={latestNorm?.fallback ? 'warning' : 'default'} />
-          {latestNorm && (
+            tone={focusNorm?.fallback ? 'warning' : 'default'} />
+          {focusNorm && (
             <p className="flex flex-wrap items-center gap-1.5 px-1 text-caption text-slate-500">
-              {latestNorm.fallback ? (
+              {focusNorm.fallback ? (
                 <>
                   <StatusPill tone="warning">Limited history</StatusPill>
                   <span className="text-amber-700">Needs 7+ days for a model forecast</span>
@@ -714,7 +727,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
               ) : (
                 <>
                   <span className="font-semibold text-brand-700">Model forecast</span>
-                  <span>· model {latestNorm.modelVersion.slice(0, 8)}</span>
+                  <span>· model {focusNorm.modelVersion.slice(0, 8)}</span>
                 </>
               )}
             </p>
@@ -730,7 +743,7 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
               : `the range below holds about ${Math.round(coveragePct / 10)} days in 10`
           }
           icon={InfoIcon}
-          tone={latestNorm?.fallback ? 'warning' : 'default'} />
+          tone={focusNorm?.fallback ? 'warning' : 'default'} />
 
         <StatCard
           label="Busiest day ahead"
@@ -742,17 +755,17 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
         <StatCard
           label="Likely range"
           value={
-            latestNorm
-              ? `${latestNorm.lower.toLocaleString('en-US')}–${latestNorm.upper.toLocaleString('en-US')}`
+            focusNorm
+              ? `${focusNorm.lower.toLocaleString('en-US')}–${focusNorm.upper.toLocaleString('en-US')}`
               : '—'
           }
           sub={
-            latestNorm
+            focusNorm
               ? `guests on the day, ${coveragePct}% of the time`
               : 'needs a forecast'
           }
           icon={ChevronDownIcon}
-          tone={latestNorm?.fallback ? 'warning' : 'success'} />
+          tone={focusNorm?.fallback ? 'warning' : 'success'} />
       </div>
 
       {/*
@@ -766,18 +779,18 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
           locationId={selectedLocationId}
           locationName={selectedLocationName}
           forecast={
-            latestNorm
+            focusNorm
               ? {
-                  target_date: latestNorm.targetDate,
-                  point: latestNorm.point,
-                  lower: latestNorm.lower,
-                  upper: latestNorm.upper,
-                  coverage: latestNorm.coverage,
+                  target_date: focusNorm.targetDate,
+                  point: focusNorm.point,
+                  lower: focusNorm.lower,
+                  upper: focusNorm.upper,
+                  coverage: focusNorm.coverage,
                 }
               : null
           }
           canSimulate={canSimulate} />
-        <ForecastWhy forecastId={latestForecast?.id ?? null} targetDate={latestDayLabel} />
+        <ForecastWhy forecastId={focusForecast?.id ?? null} targetDate={focusDayLabel} />
       </div>
 
       {/* Chart + insights */}
@@ -813,8 +826,8 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
               </div>
             </div>
             <p className="max-w-[190px] text-meta leading-snug text-slate-500 sm:text-right">
-              {latestNorm
-                ? `Shaded area is the ${Math.round(latestNorm.coverage * 100)}% range we expect demand to fall in`
+              {focusNorm
+                ? `Shaded area is the ${Math.round(focusNorm.coverage * 100)}% range we expect demand to fall in`
                 : 'Shaded area is the forecast range'}
             </p>
           </div>
@@ -845,16 +858,16 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
             )}
           </div>
 
-          {latestNorm && latestNorm.fallback && (
+          {focusNorm && focusNorm.fallback && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <StatusPill tone="warning">Limited history</StatusPill>
               <span className="text-meta text-amber-800">Model forecast with limited history. 7+ days gives tighter intervals.</span>
             </div>
           )}
-          {latestNorm && (
+          {focusNorm && (
             <div className="mt-2 flex flex-wrap gap-2 text-fine text-slate-500">
-              <span>model version {latestNorm.modelVersion.slice(0, 8) || '—'}</span>
-              <span>· this range holds about {Math.round(latestNorm.coverage * 10)} days in 10</span>
+              <span>model version {focusNorm.modelVersion.slice(0, 8) || '—'}</span>
+              <span>· this range holds about {Math.round(focusNorm.coverage * 10)} days in 10</span>
             </div>
           )}
         </section>
@@ -871,19 +884,19 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
             AI Insights
           </h2>
 
-          {latestForecast ? (
+          {focusForecast ? (
             <ul className="mt-4 flex flex-col gap-4">
               <li className="flex items-start gap-3">
                 <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50">
                   <LightbulbIcon className="h-4 w-4 text-brand-600" strokeWidth={2} />
                 </span>
-                <p className="text-body-sm leading-relaxed text-slate-700">Around {latestNorm?.point.toLocaleString('en-US')} visitors are expected on {peakDayLabel}, most likely between {latestNorm?.lower.toLocaleString('en-US')} and {latestNorm?.upper.toLocaleString('en-US')}.</p>
+                <p className="text-body-sm leading-relaxed text-slate-700">Around {focusNorm?.point.toLocaleString('en-US')} visitors are expected on {focusDayLabel}, most likely between {focusNorm?.lower.toLocaleString('en-US')} and {focusNorm?.upper.toLocaleString('en-US')}.</p>
               </li>
               <li className="flex items-start gap-3">
                 <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50">
                   <LightbulbIcon className="h-4 w-4 text-brand-600" strokeWidth={2} />
                 </span>
-                <p className="text-body-sm leading-relaxed text-slate-700">As of {latestNorm?.targetDate} · model version {latestNorm?.modelVersion.slice(0, 8) || '—'} · {latestNorm?.fallback ? 'Historical average (needs 7 days)' : 'Model forecast'}</p>
+                <p className="text-body-sm leading-relaxed text-slate-700">As of {focusNorm?.targetDate} · model version {focusNorm?.modelVersion.slice(0, 8) || '—'} · {focusNorm?.fallback ? 'Historical average (needs 7 days)' : 'Model forecast'}</p>
               </li>
               <li className="flex items-start gap-3">
                 <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50">
@@ -970,8 +983,8 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={!latestForecast || exportingId !== null}
-              onClick={() => latestForecast && void handleExport(latestForecast.id)}
+              disabled={!focusForecast || exportingId !== null}
+              onClick={() => focusForecast && void handleExport(focusForecast.id)}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-body-sm font-semibold text-slate-700 transition-colors duration-150 ease-out hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50">
               
               <DownloadIcon className="h-4 w-4 text-brand-600" strokeWidth={2} />

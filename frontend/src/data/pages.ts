@@ -42,7 +42,11 @@ export const pageMeta: Record<string, PageMeta> = {
     subtitle: 'Where demand stands today and what needs your attention.',
     icon: HomeIcon,
     footerLeft: 'Live data · last ingest 12 minutes ago',
-    footerRight: 'Forecast model v4.2'
+    // There is no single "model vN" to name here: the served export is whatever
+    // this deployment loads, and it is published on the Model Registry and on
+    // every forecast row. A frozen version string in a static map goes stale
+    // silently, which is what "Forecast model v4.2" had done.
+    footerRight: 'Model version is shown on every forecast'
   },
   analytics: {
     title: 'Analytics',
@@ -56,7 +60,11 @@ export const pageMeta: Record<string, PageMeta> = {
     subtitle: 'AI-powered visitor and demand predictions.',
     icon: GaugeIcon,
     footerLeft: 'Forecasts refresh nightly from your ingested demand data.',
-    footerRight: 'Model v4.2 · last trained Jun 3, 2025'
+    // Was "Model v4.2 · last trained Jun 3, 2025" while the API was serving
+    // lightgbm-fs-2026.09.2-it332 — a version and a date that nothing in the
+    // system reported. The served version is per-forecast data, so it is named
+    // beside each row rather than guessed at here.
+    footerRight: 'Model version is shown on every forecast'
   },
   ingestion: {
     title: 'Import Demand Data',
