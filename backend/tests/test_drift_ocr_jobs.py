@@ -13,16 +13,41 @@ import uuid
 
 import pytest
 
-from app.jobs.runner import JOBS, enqueue_run, run_job
+from app.jobs.runner import JOB_SCHEDULE, JOBS, enqueue_run, run_job
 from app.jobs.scheduler import cron_matches, due_jobs
 from app.services.drift import population_stability_index
 from app.services.ingestion.image import parse_ocr_text, preview_for_image
+from app.services.ingestion.retention import photo_retention_cutoff
 
 # A real 1x1 PNG: the upload route validates content, so a fake byte string is
 # no longer a valid stand-in for "an image the OCR engine read nothing from".
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
 )
+
+# ---------------------------------------------------------- photo retention ---
+
+
+def test_photo_retention_cutoff_is_thirty_days_and_always_utc() -> None:
+    """A photo older than 30 days is eligible; the policy states that window."""
+    now = datetime.datetime(2026, 10, 29, 12, 0, tzinfo=datetime.UTC)
+    assert photo_retention_cutoff(now) == datetime.datetime(
+        2026, 9, 29, 12, 0, tzinfo=datetime.UTC
+    )
+    # A naive reference is treated as UTC rather than silently becoming local.
+    assert photo_retention_cutoff(datetime.datetime(2026, 10, 29, 12, 0)) == datetime.datetime(
+        2026, 9, 29, 12, 0, tzinfo=datetime.UTC
+    )
+
+
+def test_photo_retention_is_registered_and_scheduled_daily() -> None:
+    """The job must be in JOBS and on the cadence table, or it never runs."""
+    assert "photo_retention" in JOBS
+    assert JOB_SCHEDULE["photo_retention"]["cron"] == "30 2 * * *"
+    assert "photo_retention" in due_jobs(
+        datetime.datetime(2026, 10, 29, 2, 30, tzinfo=datetime.UTC)
+    )
+
 
 # --------------------------------------------------------------- OCR parser ---
 

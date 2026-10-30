@@ -30,7 +30,7 @@ from app.jobs.runner import JOBS, execute_queued, run_job
 from app.main import create_app
 from app.models.connector_mapping import ConnectorMapping
 from app.models.forecast import Calibration, ModelVersion
-from app.models.location import Connector, DemandObservation, Location
+from app.models.location import Connector, DemandObservation, IngestUpload, Location
 from app.models.pipeline import PipelineRun
 from app.models.quality import Alert
 from app.models.report import Report, ReportSchedule
@@ -138,6 +138,50 @@ def _seed(prefix: str) -> dict[str, uuid.UUID]:
         )
         db.commit()
         return {"workspace": ws.id, "location": loc.id, "model": model.id, "connector": conn.id}
+
+
+def test_photo_retention_clears_old_photos_and_keeps_the_upload() -> None:
+    """Only the image bytes expire; the import and its demand history stay."""
+    ids = _seed("Retention")
+    now = datetime.datetime.now(datetime.UTC)
+    old_id, fresh_id = uuid.uuid4(), uuid.uuid4()
+
+    with _session_factory()() as db:
+        db.add_all(
+            [
+                IngestUpload(
+                    id=old_id,
+                    workspace_id=ids["workspace"],
+                    kind="image",
+                    filename="old-log.png",
+                    status="ready",
+                    source_image=b"old-photo",
+                    source_mime="image/png",
+                    created_at=now - datetime.timedelta(days=31),
+                ),
+                IngestUpload(
+                    id=fresh_id,
+                    workspace_id=ids["workspace"],
+                    kind="image",
+                    filename="new-log.png",
+                    status="ready",
+                    source_image=b"new-photo",
+                    source_mime="image/png",
+                    created_at=now - datetime.timedelta(days=1),
+                ),
+            ]
+        )
+        db.commit()
+
+    run = _run("photo_retention", ids["workspace"])
+    assert run.status == "success", run.detail
+    assert run.rows_processed == 1
+
+    with _session_factory()() as db:
+        old = db.get(IngestUpload, old_id)
+        fresh = db.get(IngestUpload, fresh_id)
+        assert old is not None and old.source_image is None and old.source_mime is None
+        assert fresh is not None and fresh.source_image == b"new-photo"
 
 
 def _run(job_type: str, workspace_id: uuid.UUID) -> PipelineRun:
