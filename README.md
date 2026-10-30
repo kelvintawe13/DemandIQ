@@ -17,7 +17,9 @@ monitoring that admits when the model has stopped being trustworthy.
 **Repository:** <https://github.com/kelvintawe13/DemandIQ>
 
 
-**Video demo:** <https://drive.google.com/drive/folders/1w_Qtq6P1c3YwbjR1ygGxMKzfW-YHPcjl?usp=sharing>
+**Video demo:**
+
+- **Video demo (Vimeo):** <https://vimeo.com/1241471250?fl=ip&fe=ec>
 
 ---
 

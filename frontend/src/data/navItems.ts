@@ -298,11 +298,16 @@ export const navSections: NavSection[] = [
   titleKey: 'nav.group.operations',
   items: [
   {
+    // The owner's own sites: which can be forecast, what they serve, and adding
+    // one is the first thing a new workspace does. `locations:read` and
+    // `locations:write` are both in the owner bundle (`_OWNER` inherits
+    // `_ADMIN`'s location capabilities), so the API serves this screen to the
+    // owner and the sidebar may list it.
     id: 'admin-locations',
     label: 'Locations & Menu',
     labelKey: 'nav.locations',
     icon: MapPinIcon,
-    roles: ['Administrator']
+    roles: ['Owner', 'Administrator']
   },
   {
     // Enrolment, credential rotation, quarantine and health for the till/POS

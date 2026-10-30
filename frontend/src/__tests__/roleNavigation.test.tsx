@@ -51,9 +51,11 @@ describe('role navigation', () => {
 
   it('keeps the owner on the business screens and out of every admin console', () => {
     const ids = idsFor('Owner');
-    // The owner runs the restaurant, not the platform: the business workspace
-    // and its own settings, and nothing from the console groups.
+    // The owner runs the restaurant, not the platform: the business workspace,
+    // its own sites (Locations & Menu) and its own settings, and nothing else
+    // from the console groups.
     expect(ids.sort()).toEqual([
+      'admin-locations',
       'alerts',
       'analytics',
       'forecast',
@@ -71,7 +73,6 @@ describe('role navigation', () => {
       'admin-features',
       'admin-policies',
       'admin-explainer',
-      'admin-locations',
       'device-fleet',
       'admin-approvals',
       'admin-access',
@@ -113,7 +114,8 @@ describe('role navigation', () => {
 
   it("shows the owner the workspace screens the administrator keeps too", () => {
     // The original defect: an owner could not reach their own forecast screen.
-    for (const id of ['overview', 'analytics', 'forecast', 'ingestion', 'reports', 'alerts']) {
+    // Locations & Menu is here for the same reason — the sites are the owner's.
+    for (const id of ['overview', 'analytics', 'forecast', 'ingestion', 'reports', 'alerts', 'admin-locations']) {
       expect(canAccess('Owner', id)).toBe(true);
       expect(canAccess('Administrator', id)).toBe(true);
     }
@@ -133,12 +135,14 @@ describe('role navigation', () => {
     expect(labels('Viewer')).toEqual(['nav.group.insights']);
     expect(labels('Data Clerk')).toEqual(['nav.group.insights', 'nav.group.data', 'nav.group.system']);
     // The console groups belong to the administrator; the owner is a business
-    // role, so its sidebar is the workspace groups only.
+    // role, so its sidebar is the workspace groups plus the site list it runs
+    // (`admin-locations` sits in the operations group).
     expect(labels('Analyst')).not.toContain('nav.group.governance');
     expect(labels('Owner')).toEqual([
       'nav.group.insights',
       'nav.group.data',
       'nav.group.system',
+      'nav.group.operations',
     ]);
     expect(labels('Administrator')).toContain('nav.group.governance');
   });

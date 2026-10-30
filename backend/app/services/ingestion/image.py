@@ -283,7 +283,8 @@ def validate_image_upload(content: bytes, filename: str | None = None) -> ImageI
 class _Preprocess:
     """How the image handed to Tesseract relates to the upload.
 
-    Tesseract's boxes are in the coordinates of the straightened, upscaled,
+    Tesseract's 
+      are in the coordinates of the straightened, upscaled,
     padded copy it read, not of the photo the operator is looking at. The review
     screen draws its highlights on the photo, so those boxes have to be mapped
     back through every step this module applied.
