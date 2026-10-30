@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { UploadIcon, InfoIcon, LightbulbIcon } from 'lucide-react';
+import { UploadIcon, InfoIcon, LightbulbIcon, ShieldCheckIcon } from 'lucide-react';
 import { CameraNotebook } from './illustrations/CameraNotebook';
 import { EmptyState } from './ui/EmptyState';
 import { Spinner } from './ui/LoadingState';
@@ -45,6 +45,13 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   const [dragOver, setDragOver] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   /**
+   * Consent is per upload, not per account: the sign-up checkbox accepts the
+   * terms, but it is not permission to photograph someone else's log. The
+   * upload control stays disabled until this is ticked, and drag-and-drop is
+   * refused too, so there is no path that sends a photo without it.
+   */
+  const [consent, setConsent] = useState(false);
+  /**
    * The year this page belongs to, for dates written without one ("12 Oct").
    * The server defaults to the current year, which quietly misfiles an archive
    * page as this year's demand, so the operator states it here.
@@ -61,6 +68,11 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
   const handleFile = async (file?: File) => {
     if (!file) return;
     setError(null);
+    if (!consent) {
+      clearPreview();
+      setError({ message: 'Confirm you have permission to upload this photo before choosing one.' });
+      return;
+    }
     if (isHeic(file)) {
       clearPreview();
       setError({ message: 'HEIC/HEIF photos are not supported yet. Convert the photo to JPG or PNG, then upload it again.' });
@@ -151,6 +163,30 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
       </h2>
       <p className="mt-1 text-control text-slate-500">Upload a clear photo of handwritten visitor records.</p>
 
+      <div className="mt-3 rounded-xl border border-brand-100 bg-brand-50 px-3.5 py-3 dark:border-slate-700 dark:bg-slate-800/60">
+        <div className="flex items-start gap-2.5">
+          <ShieldCheckIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand-600" strokeWidth={1.75} />
+          <div className="min-w-0">
+            <p className="text-body-sm font-semibold text-slate-800 dark:text-slate-100">Before you upload</p>
+            <label className="mt-1.5 flex items-start gap-2 text-body-sm text-slate-700 dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(event) => setConsent(event.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-brand-600"
+              />
+              <span>
+                I have permission to upload this photo, and it does not show a customer's name or phone number.
+              </span>
+            </label>
+            <p className="mt-1.5 text-caption leading-relaxed text-slate-500 dark:text-slate-400">
+              Photos are read on DemandIQ's own server, deleted with the import they belong to, and removed
+              automatically once they are 30 days old.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -211,7 +247,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
         <button
           type="button"
           onClick={() => fileInput.current?.click()}
-          disabled={uploading}
+          disabled={uploading || !consent}
           className="mt-5 inline-flex items-center gap-2.5 rounded-lg bg-brand-700 px-5 py-3 text-body font-semibold text-white shadow-sm transition-colors duration-150 ease-out hover:bg-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           <UploadIcon className="h-[18px] w-[18px]" strokeWidth={2} />

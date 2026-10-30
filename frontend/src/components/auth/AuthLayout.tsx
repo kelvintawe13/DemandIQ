@@ -12,9 +12,9 @@ interface AuthLayoutProps {
 }
 
 const defaultHighlights = [
-'Forecast daily demand at dish level',
+"Forecast tomorrow's customers, with a range",
 'Ingest POS, mobile money, files or handwriting',
-'Cut food waste by up to 40%'];
+'See what moved a forecast before you prep'];
 
 
 export function AuthLayout({

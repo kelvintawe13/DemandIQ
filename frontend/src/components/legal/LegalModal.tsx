@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { XIcon, ShieldCheckIcon } from 'lucide-react';
+import { XIcon } from 'lucide-react';
 import { legalDocuments } from '../../data/legal';
 import type { LegalDocument } from '../../data/legal';
 import { useDialogBehaviour } from '../ui/useDialogBehaviour';
@@ -15,7 +15,7 @@ interface LegalModalProps {
 /**
  * Full legal reader. The document is displayed with navigation.
  */
-export function LegalModal({ openId, onClose, onSelect }: LegalModalProps) {
+export function LegalModal({ openId, onClose }: LegalModalProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   // The same contract as `Modal` — Escape, the Tab trap, focus return and the
   // scroll lock. This reader keeps its own layout because a long legal document

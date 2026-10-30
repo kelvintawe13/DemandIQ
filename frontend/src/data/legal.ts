@@ -40,26 +40,26 @@ export const legalDocuments: LegalDocument[] = [
   {
     heading: 'How photo reading works',
     body: [
-    'Photos are read on our own server by default. If your workspace turns on the optional outside vision service, the photo is sent to that service to be read, and it may be processed outside Rwanda. The service is off unless you switch it on, and DemandIQ tells you before it sends anything.',
-    'Every row read from a photo waits for your review. Nothing is saved until you confirm it. DemandIQ never invents a row: if it cannot read something, it returns nothing and says so.']
+    'Photos are read on our own server in Rwanda. This deployment does not use an outside vision service, and a workspace cannot switch one on: only the person who runs DemandIQ can configure it. If that changes, this page will be updated before a photo is sent anywhere else.',
+    'Before a photo is uploaded, DemandIQ asks you to confirm that you have permission to upload it and that it does not show a customer\'s name or phone number. Every row read from a photo then waits for your review. Nothing is saved until you confirm it. DemandIQ never invents a row: if it cannot read something, it returns nothing and says so.']
 
   },
   {
     heading: 'Your control',
     body: [
-    'You can edit any row before saving it. You can undo an import, which removes the rows it created. You can download your demand records. You can ask us to delete your account and data.']
+    'You can edit any row before saving it. You can undo an import, which removes the rows it created and the photo it came from. You can download a forecast and your analytics as CSV, and you can generate and download reports. To receive a full copy of your demand records, email us and we will send it within 30 days. You can ask us to delete your account and data.']
 
   },
   {
     heading: 'Who can see your data',
     body: [
-    'Only people in your workspace. We do not sell data or share it between workspaces. We share data only with the hosting provider that runs DemandIQ and, if you switch it on, the outside vision service.']
+    'Only people in your workspace. We do not sell data or share it between workspaces. We share data only with the hosting provider that runs DemandIQ.']
 
   },
   {
     heading: 'How long we keep it',
     body: [
-    'We keep your records while your account is active. Photos are deleted when you delete the import they belong to, and in any case 30 days after upload. If you ask us to delete your data, we do it within 30 days.']
+    'We keep your records while your account is active. Photos are deleted when you delete the import they belong to, and automatically once they are 30 days old. If you want a photo removed sooner, delete the import it belongs to. If you ask us to delete your data, we do it within 30 days.']
 
   },
   {

@@ -671,6 +671,25 @@ export function DemandForecast({ onNavigate }: DemandForecastProps) {
         </p>
       </div>
 
+      {/*
+        The model was trained on public restaurant data from Japan. Saying so
+        beside the numbers is the difference between a decision aid and a
+        confident guess: an operator in Kigali needs to know the data does not
+        come from businesses like theirs.
+      */}
+      <div
+        role="note"
+        aria-label="Training data and accuracy limit"
+        className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+        
+        <InfoIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-amber-700 dark:text-amber-400" strokeWidth={1.75} />
+        <p className="text-body-sm leading-relaxed text-amber-900 dark:text-amber-100">
+          <span className="font-semibold">Trained on restaurant data from Japan.</span>{' '}
+          Forecasts can be wrong, especially on very busy days and for businesses unlike those
+          restaurants. Use your own judgement before you buy or prepare food.
+        </p>
+      </div>
+
       {/* Calendar clock: ML features for the forecast target date (as_of 23:59) */}
       <div className="mt-3">
         <CalendarClock targetDate={addDaysISO(today, 1)} />
