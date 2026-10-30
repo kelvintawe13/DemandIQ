@@ -32,6 +32,7 @@ from app.services.alerting import raise_alert, record_job_failure, record_job_su
 from app.services.drift import compute_drift
 from app.services.forecasting.generate import generate_forecast
 from app.services.ingestion.connector_pull import pull_connector
+from app.services.ingestion.retention import PHOTO_RETENTION_DAYS, purge_expired_photos
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ JOB_SCHEDULE: dict[str, dict[str, str]] = {
     "report_delivery": {"cadence": "07:00 local", "cron": "0 7 * * *"},
     "report_generation": {"cadence": "Every minute", "cron": "* * * * *"},
     "drift_check": {"cadence": "Hourly", "cron": "0 * * * *"},
+    "photo_retention": {"cadence": "02:30 daily", "cron": "30 2 * * *"},
 }
 
 
@@ -423,6 +425,18 @@ def _job_drift_check(db: Session, workspace_id: uuid.UUID) -> JobOutcome:
     return JobOutcome(len(signals), f"drift {overall}")
 
 
+def _job_photo_retention(db: Session, workspace_id: uuid.UUID) -> JobOutcome:
+    """Clear stored photos older than the 30-day window the policy promises.
+
+    The upload and its parsed rows stay: the demand history is not personal
+    data, but the photo can be. Deleting an import remains the immediate path.
+    """
+    cleared = purge_expired_photos(db, workspace_id=workspace_id)
+    return JobOutcome(
+        cleared, f"cleared {cleared} photo(s) older than {PHOTO_RETENTION_DAYS} days"
+    )
+
+
 JOBS: dict[str, Callable[[Session, uuid.UUID], JobOutcome]] = {
     "connector_sync": _job_connector_sync,
     "feature_materialisation": _job_feature_materialisation,
@@ -432,6 +446,7 @@ JOBS: dict[str, Callable[[Session, uuid.UUID], JobOutcome]] = {
     "report_delivery": _job_report_delivery,
     "report_generation": _job_report_generation,
     "drift_check": _job_drift_check,
+    "photo_retention": _job_photo_retention,
 }
 
 

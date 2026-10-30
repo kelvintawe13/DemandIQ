@@ -775,6 +775,8 @@ Where to look for each thing the assignment asks about.
 | `database/AGENT_SCHEMA.sql` | Assistant quota / session tables |
 | `docs/DESIGN.md` | UI design process, wireframes, style guide |
 | `docs/screenshots/` | Nine application screenshots |
+| `docs/PROCESSING_RECORD.md` | Record of personal data processing (Law No. 058/2021, Art. 17) |
+| `docs/PARTICIPANT_INFORMATION_SHEET.md` | Sheet given to a participant before consent |
 | `backend/API_ENDPOINTS.md` | Generated endpoint reference |
 | `model/FEATURE_SPEC.md` | The 26-feature contract |
 | `model/PIPELINE.md` | Stage-by-stage pipeline documentation |
