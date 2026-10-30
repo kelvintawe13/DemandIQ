@@ -184,6 +184,14 @@ describe('the guided prepare journey', () => {
     });
   });
 
+  it('states the training-data limit beside the forecast', async () => {
+    await renderForecast();
+
+    const note = await screen.findByRole('note', { name: /training data and accuracy limit/i });
+    expect(note).toHaveTextContent(/trained on restaurant data from Japan/i);
+    expect(note).toHaveTextContent(/can be wrong, especially on very busy days/i);
+  });
+
   it('leads with one plain-language answer and shows all three rules', async () => {
     await renderForecast();
 
