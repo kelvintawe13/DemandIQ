@@ -63,8 +63,16 @@ _DMY2_DATE = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})\b")
 # month-first before rows are parsed. The lookarounds keep this from matching
 # the tail of an ISO date (the "26-01-12" inside "2026-01-12").
 _NUMERIC_DATE = re.compile(r"(?<!\d)(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)")
+# The day is a number, but Tesseract reads a hand-written 1 as ``l``, ``I`` or
+# ``|``. On a ruled page the first row's leading 1 becomes the table's own
+# vertical rule — "| Oct 2026 34" — and the eleventh becomes "ll". The day-first
+# pattern accepted digits only, so those two lines had a month and a count but no
+# day, and the first and eleventh of every such page were silently missing from
+# the preview. The lookbehind is not ``\b`` because a leading ``|`` is not a word
+# character and would never sit on a boundary.
 _TEXT_DATE = re.compile(
-    r"\b(\d{1,2})[-/.\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-/.\s]?(20\d{2})?\b",
+    r"(?<!\w)(\d{1,2}|[lI|]{1,2})[-/.\s]?"
+    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-/.\s]?(20\d{2})?\b",
     re.IGNORECASE,
 )
 # US-style logs put the month first ("Oct 1", "October 12, 2026"). The day
@@ -624,9 +632,14 @@ def _find_date(
             )
         elif kind == "text":  # day first, e.g. "3 Jan 2026" or "3 Jan"
             month = _MONTHS.get(match.group(2).lower()[:3])
+            # A day read as ``|`` or ``ll`` is still a day to a human, and the
+            # same look-alike handling the month-first form already uses applies.
+            day = _glyph_digits(match.group(1))
+            if day is None:
+                continue
             year_raw = match.group(3)
             year = int(year_raw) if year_raw else _default_year(reporting_year)
-            date = _safe_date(year, month or 0, match.group(1))
+            date = _safe_date(year, month or 0, day)
         else:  # month first, e.g. "Oct 1" or "October 12, 2026"
             month = _MONTHS.get(match.group(1).lower()[:3])
             # Tesseract commonly reads a handwritten/printed 1 as l, I or |.

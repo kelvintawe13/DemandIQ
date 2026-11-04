@@ -682,6 +682,34 @@ def test_a_position_grouped_read_does_not_overrule_a_line_read() -> None:
     assert disagreements == 0
 
 
+def test_a_first_day_read_as_the_table_rule_is_still_the_first() -> None:
+    """Day one is the row a hand-written page loses first.
+
+    The header sits directly above it, so Tesseract read the leading 1 as the
+    table's vertical rule: the line came back "| Oct 2026 34". It carried a
+    month and a count but no day, so the first day of the page was missing from
+    the preview entirely — and with it, the whole first week on a page that
+    starts at the top of a month.
+    """
+    from app.services.ingestion.image import parse_ocr_text
+
+    rows = parse_ocr_text("| Oct 2026 34\n2 Oct 2026 28", day_first=True, reporting_year=2026)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [
+        ("2026-10-01", 34),
+        ("2026-10-02", 28),
+    ]
+
+
+def test_an_eleventh_read_as_two_bars_is_the_eleventh() -> None:
+    """The same look-alike, doubled: "ll Oct" is the eleventh, not no date."""
+    from app.services.ingestion.image import parse_ocr_text
+
+    rows = parse_ocr_text("ll Oct 2026 49", day_first=True, reporting_year=2026)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [("2026-10-11", 49)]
+
+
 def test_a_count_far_from_the_rest_of_the_page_is_flagged() -> None:
     """A unanimous misread still has to be visible before it is committed.
 
