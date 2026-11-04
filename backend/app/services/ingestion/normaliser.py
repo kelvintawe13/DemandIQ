@@ -269,6 +269,14 @@ def commit_demand(
         if upload_id is not None:
             existing.upload_id = upload_id
         db.flush()
+        _maybe_evaluate_quality(
+            db,
+            workspace_id=workspace_id,
+            location_id=location_id,
+            date=date,
+            previous_qty=prev,
+            new_qty=demand_qty,
+        )
         logger.info(
             "demand reconciled location=%s date=%s %s -> %s source=%s",
             location_id,
@@ -300,6 +308,14 @@ def commit_demand(
     )
     db.add(obs)
     db.flush()
+    _maybe_evaluate_quality(
+        db,
+        workspace_id=workspace_id,
+        location_id=location_id,
+        date=date,
+        previous_qty=None,
+        new_qty=demand_qty,
+    )
     logger.info(
         "demand committed location=%s date=%s qty=%s source=%s",
         location_id,
@@ -397,6 +413,45 @@ def _publish_demand_change(
             location_id,
             date,
             exc_info=True,
+        )
+
+
+def _maybe_evaluate_quality(
+    db: Session,
+    *,
+    workspace_id: uuid.UUID,
+    location_id: uuid.UUID,
+    date: datetime.date,
+    previous_qty: int | None,
+    new_qty: int,
+) -> None:
+    """Re-derive the workspace's quality issues after a demand row lands.
+
+    Lives here, at the only place ``demand_observations`` are written, so every
+    channel — manual, file, image, device, connector — reaches the Quality
+    Monitor without each adapter having to remember. Before this hook the
+    monitor scored a workspace from issues nothing in the application created;
+    only the seed scripts did.
+
+    Best-effort by contract, like the fan-out and conformal updates either side
+    of it: the row is already written, so a failing check must never turn a
+    successful import into an error. The detector swallows its own failures and
+    this wrapper catches the import itself.
+    """
+    try:
+        from app.services.quality.detector import evaluate_after_commit
+
+        evaluate_after_commit(
+            db,
+            workspace_id=workspace_id,
+            location_id=location_id,
+            day=date,
+            previous_qty=previous_qty,
+            new_qty=new_qty,
+        )
+    except Exception:
+        logger.warning(
+            "quality evaluation failed location=%s date=%s", location_id, date, exc_info=True
         )
 
 

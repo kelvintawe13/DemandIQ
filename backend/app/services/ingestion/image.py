@@ -150,6 +150,18 @@ _UPSCALE_BELOW_EDGE = 800
 _UPSCALE_TO_EDGE = 1600
 _MAX_UPSCALE = 3.0
 
+# How many segmentation reads may run at once. Each is a separate Tesseract
+# process, so the limit is about cores rather than Python threads; six covers the
+# default three modes on both copies of the page without oversubscribing a
+# laptop-class box.
+_MAX_PARALLEL_READS = 6
+
+# A 48-50 MP phone photo is roughly 0.8 MB on disk and an entirely ordinary page;
+# 200 MP sensors exist. The ceiling below is not a camera limit — it only stops a
+# small file from expanding into a decompression bomb, so it sits far above any
+# phone and below what would exhaust the container's memory.
+_MAX_ACCEPTED_PIXELS = 100_000_000
+
 # Deskew search: a few degrees either way, measured on a small probe so the
 # extra work does not double the OCR latency.
 _DESKEW_PROBE_WIDTH = 240
@@ -254,16 +266,19 @@ def validate_image_upload(content: bytes, filename: str | None = None) -> ImageI
     except ImportError:
         return ImageInfo(width=None, height=None, format=sniffed)
 
-    max_pixels = int(get_settings().ocr_max_pixels)
     try:
         with Image.open(io.BytesIO(content)) as opened:
             width, height = opened.size
             if width <= 0 or height <= 0:
                 raise ImageValidationError("Image has no usable dimensions")
-            if width * height > max_pixels:
+            # ``ocr_max_pixels`` is the working size OCR reduces a photo to, not a
+            # validity test — refusing an oversize photo here was what turned every
+            # modern phone photo into "0 rows, no engine". Only the bomb ceiling
+            # rejects.
+            if width * height > _MAX_ACCEPTED_PIXELS:
                 raise ImageValidationError(
                     f"Image is {width}x{height} ({width * height:,} pixels); "
-                    f"the limit is {max_pixels:,} pixels"
+                    f"the limit is {_MAX_ACCEPTED_PIXELS:,} pixels"
                 )
             fmt = (opened.format or sniffed).lower()
             # ``verify`` checks the file structure without decoding every pixel;
@@ -364,10 +379,10 @@ def _preprocess(content: bytes) -> tuple[Any, _Preprocess]:
     max_pixels = int(get_settings().ocr_max_pixels)
     with Image.open(io.BytesIO(content)) as opened:
         width, height = opened.size
-        if width * height > max_pixels:
+        if width * height > _MAX_ACCEPTED_PIXELS:
             raise ImageValidationError(
                 f"Image is {width}x{height} ({width * height:,} pixels); "
-                f"the limit is {max_pixels:,} pixels"
+                f"the limit is {_MAX_ACCEPTED_PIXELS:,} pixels"
             )
         opened.load()
         image = ImageOps.exif_transpose(opened)
@@ -378,18 +393,31 @@ def _preprocess(content: bytes) -> tuple[Any, _Preprocess]:
     source_size = image.size
     width, height = image.size
     scale = 1.0
+    resample = getattr(Image, "Resampling", Image).LANCZOS
+    # Reduce an oversize photo rather than refusing it. Everything below
+    # (grayscale, the deskew probe, three independent segmentation passes) costs
+    # time proportional to these pixels, so the budget is what keeps a 48 MP
+    # upload readable in seconds; ``scale`` carries the reduction into
+    # ``_Preprocess`` so a highlight still lands where the operator can see it.
+    if width * height > max_pixels:
+        factor = math.sqrt(max_pixels / (width * height))
+        image = image.resize(
+            (max(1, int(width * factor)), max(1, int(height * factor))), resample
+        )
+        width, height = image.size
+        scale = width / source_size[0] if source_size[0] else 1.0
     shortest = min(width, height)
     if shortest and shortest < _UPSCALE_BELOW_EDGE:
         factor = min(_UPSCALE_TO_EDGE / shortest, _MAX_UPSCALE)
         if factor > 1.05:
-            resample = getattr(Image, "Resampling", Image).LANCZOS
             image = image.resize(
                 (max(1, int(width * factor)), max(1, int(height * factor))),
                 resample,
             )
             # Recorded as what was actually applied, not the requested factor:
-            # the resize rounds to whole pixels (and to a minimum of 1).
-            scale = image.size[0] / width if width else 1.0
+            # the resize rounds to whole pixels (and to a minimum of 1), and it is
+            # measured against the upload so a prior reduction is not lost.
+            scale = image.size[0] / source_size[0] if source_size[0] else 1.0
 
     gray = ImageOps.grayscale(image)
     # Lighting first: a shadow crossing the page reads as a tilt to the deskew
@@ -1371,6 +1399,79 @@ def _binarise(gray: Any) -> Any:
     return gray.point(lambda value: 255 if value > threshold else 0, mode="L")
 
 
+def _read_variant(
+    page: Any,
+    *,
+    psm: int,
+    variant: str,
+    language: str,
+    timeout: float,
+    prep: _Preprocess,
+    reporting_year: int | None,
+) -> tuple[_Read | None, str | None]:
+    """Read one copy of the page with one segmentation mode.
+
+    Returns the read (``None`` when it found no rows) and, separately, the text of
+    an engine-level failure. Nothing is shared between calls, which is what lets
+    these run at the same time — see :func:`_tesseract_extraction`.
+
+    The body is deliberately identical to what the sequential loop used to do per
+    mode: parse the engine's own lines, read word geometry as an aid, and keep the
+    position-grouped reconstruction only when it explains more of the page.
+    """
+    import pytesseract
+
+    try:
+        text = pytesseract.image_to_string(
+            page, lang=language, config=f"--psm {psm}", timeout=timeout
+        )
+    except TypeError:  # pytesseract < 0.3.10 has no timeout parameter
+        try:
+            text = pytesseract.image_to_string(page, lang=language, config=f"--psm {psm}")
+        except Exception as exc:
+            return None, f"psm {psm} ({variant}): {exc}"
+    except Exception as exc:  # a failed pass must not discard the others
+        return None, f"psm {psm} ({variant}): {exc}"
+
+    day_first = _infer_day_first(text)
+    parsed = _parse_lines(text.splitlines(), day_first=day_first, reporting_year=reporting_year)
+    line_rows = [row.as_row(index) for index, row in enumerate(parsed)]
+    try:
+        word_data: _WordData | None = _read_word_data(page, language, psm, timeout)
+    except Exception:  # geometry is an aid, not a requirement
+        word_data = None
+
+    mean_confidence = word_data.mean_confidence if word_data else None
+    rows, row_source = line_rows, "lines"
+    if word_data is not None:
+        if line_rows:
+            _attach_boxes(parsed, line_rows, word_data.by_line, prep)
+        # A sheet read column-by-column has every date in one engine line and
+        # every count in another, so the line parser sees two halves it cannot
+        # join. Re-grouping by position recovers those pairs; it is only taken
+        # when it explains more of the page than the lines.
+        cell_rows = _cells_extraction(
+            word_data.words, prep, day_first=day_first, reporting_year=reporting_year
+        )
+        if _extraction_score(cell_rows, mean_confidence) > _extraction_score(
+            line_rows, mean_confidence
+        ):
+            rows, row_source = cell_rows, "cells"
+
+    if not rows:
+        return None, None
+    return (
+        _Read(
+            rows=rows,
+            source=row_source,
+            variant=variant,
+            psm=psm,
+            mean_confidence=mean_confidence,
+        ),
+        None,
+    )
+
+
 def _tesseract_extraction(
     content: bytes, language: str, *, reporting_year: int | None = None
 ) -> ImageExtraction:
@@ -1385,71 +1486,65 @@ def _tesseract_extraction(
     """
     import pytesseract
 
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Tesseract is built with OpenMP and will otherwise take every core for
+    # itself; six of those at once oversubscribe an 8-core box badly enough that
+    # every pass hits the per-pass timeout (measured: all six timed out at 30 s
+    # and the page came back empty). One thread per process, with the concurrency
+    # coming from the passes themselves, is what makes the parallel read faster
+    # rather than slower.
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
     image, prep = _preprocess(content)
     timeout = float(getattr(get_settings(), "ocr_timeout_seconds", 30.0))
+    modes = _page_segmentation_modes()
+    pages = {"photo": image, "binarised": _binarise(image)}
     reads: list[_Read] = []
     failures: list[str] = []
-    binarised = None
 
-    for psm in _page_segmentation_modes():
-        for variant in ("photo", "binarised"):
-            # The thresholded copy is only worth reading where this mode already
-            # found something on the photo: a mode that read nothing has no
-            # rows to gain, and the extra pass costs real time.
-            if variant == "binarised" and not any(read.psm == psm for read in reads):
-                continue
-            if variant == "binarised":
-                binarised = binarised if binarised is not None else _binarise(image)
-            page = image if variant == "photo" else binarised
-
-            try:
-                text = pytesseract.image_to_string(
-                    page, lang=language, config=f"--psm {psm}", timeout=timeout
-                )
-            except TypeError:  # pytesseract < 0.3.10 has no timeout parameter
-                text = pytesseract.image_to_string(page, lang=language, config=f"--psm {psm}")
-            except Exception as exc:  # a failed pass must not discard the others
-                failures.append(f"psm {psm} ({variant}): {exc}")
-                continue
-
-            day_first = _infer_day_first(text)
-            parsed = _parse_lines(
-                text.splitlines(), day_first=day_first, reporting_year=reporting_year
+    # Each (mode, copy) pair is an independent Tesseract process reading the same
+    # page, and they used to run one after another: six passes of roughly seven
+    # seconds on a 48 MP photo, which is why an upload could outlast the client
+    # that asked for it. They are submitted together instead, so the read costs
+    # about its slowest pass rather than the sum. The merge is unchanged, because
+    # the same reads come back in the same order: mode by mode, photo then
+    # thresholded copy.
+    jobs = [(psm, "photo") for psm in modes] + [(psm, "binarised") for psm in modes]
+    with ThreadPoolExecutor(max_workers=min(len(jobs), _MAX_PARALLEL_READS)) as pool:
+        futures = [
+            pool.submit(
+                _read_variant,
+                pages[variant],
+                psm=psm,
+                variant=variant,
+                language=language,
+                timeout=timeout,
+                prep=prep,
+                reporting_year=reporting_year,
             )
-            line_rows = [row.as_row(index) for index, row in enumerate(parsed)]
-            try:
-                word_data: _WordData | None = _read_word_data(page, language, psm, timeout)
-            except Exception:  # geometry is an aid, not a requirement
-                word_data = None
+            for psm, variant in jobs
+        ]
+        results = [future.result() for future in futures]
+    by_key = dict(zip(jobs, results))
 
-            mean_confidence = word_data.mean_confidence if word_data else None
-            rows, row_source = line_rows, "lines"
-            if word_data is not None:
-                if line_rows:
-                    _attach_boxes(parsed, line_rows, word_data.by_line, prep)
-                # A sheet read column-by-column has every date in one engine line
-                # and every count in another, so the line parser sees two halves
-                # it cannot join. Re-grouping by position recovers those pairs; it
-                # is only taken when it explains more of the page than the lines.
-                cell_rows = _cells_extraction(
-                    word_data.words, prep, day_first=day_first, reporting_year=reporting_year
-                )
-                if _extraction_score(cell_rows, mean_confidence) > _extraction_score(
-                    line_rows, mean_confidence
-                ):
-                    rows, row_source = cell_rows, "cells"
-
-            if not rows:
-                continue
-            reads.append(
-                _Read(
-                    rows=rows,
-                    source=row_source,
-                    variant=variant,
-                    psm=psm,
-                    mean_confidence=mean_confidence,
-                )
-            )
+    for psm in modes:
+        photo_read, photo_failure = by_key[(psm, "photo")]
+        if photo_failure:
+            failures.append(photo_failure)
+        if photo_read is not None:
+            reads.append(photo_read)
+        # Unchanged rule: the thresholded copy counts only where this mode already
+        # found something on the photo. A mode that read nothing has no rows to
+        # gain from it, and letting it in would change what gets merged.
+        if photo_read is None:
+            continue
+        binarised_read, binarised_failure = by_key[(psm, "binarised")]
+        if binarised_failure:
+            failures.append(binarised_failure)
+        if binarised_read is not None:
+            reads.append(binarised_read)
 
     if not reads:
         # Nothing was read. Raise only when the engine itself failed, so the
@@ -1498,6 +1593,16 @@ def _extract_via_tesseract(
 ENGINE_REMOTE = "remote"
 ENGINE_TESSERACT = "tesseract"
 ENGINE_NONE = "none"
+
+# What to tell the operator, and the log, when no photo reader is available.
+# The local engine needs two things — the Tesseract binary *and* its Python
+# binding — and the two environment variables are easy to miss when a photo
+# comes back empty, so the message names every route instead of the state.
+_ENGINE_HELP = (
+    "Install Tesseract with its English data and the backend 'ocr' extra "
+    "(`pip install 'demandiq-backend[ocr]'`), or set OCR_SERVICE_URL / "
+    "OCR_VISION_URL to a remote reader."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1601,18 +1706,23 @@ def extract_rows_with_engine(
         logger.info("tesseract OCR extracted %s rows from %s", len(extraction.rows), filename)
         return extraction
     except ImportError:
-        logger.info(
-            "OCR engine not installed. No rows extracted from %s "
-            "(install 'demandiq-backend[ocr]', or set OCR_SERVICE_URL / OCR_VISION_URL)",
-            filename,
-        )
+        # A missing engine is a setup fault, not a quiet page: warn so it shows
+        # in the operator's console instead of only in the review screen.
+        logger.warning("OCR engine not installed: no rows from %s. %s", filename, _ENGINE_HELP)
         if service_failure is not None:
             return ImageExtraction(
                 rows=[],
                 engine=ENGINE_NONE,
-                detail=f"The OCR service could not be reached ({service_failure}) and no local engine is installed.",
+                detail=(
+                    f"The OCR service could not be reached ({service_failure}) and no "
+                    f"local engine is installed. {_ENGINE_HELP}"
+                ),
             )
-        return ImageExtraction(rows=[], engine=ENGINE_NONE, detail="No OCR engine is configured.")
+        return ImageExtraction(
+            rows=[],
+            engine=ENGINE_NONE,
+            detail=f"No OCR engine is configured on this server. {_ENGINE_HELP}",
+        )
     except Exception as exc:
         logger.warning("local OCR failed for %s", filename, exc_info=True)
         detail = f"Local OCR failed ({str(exc) or exc.__class__.__name__})."

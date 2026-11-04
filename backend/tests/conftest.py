@@ -32,6 +32,10 @@ def _hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "turnstile_secret", None)
     monkeypatch.setattr(settings, "google_oauth_client_id", None)
     monkeypatch.setattr(settings, "google_oauth_client_secret", None)
+    # The dev-only shortcuts (magic 000000 code, any 6-digit email code) are gated
+    # on app_env != production. Docker sets APP_ENV=production by default, so pin
+    # the test environment here rather than inheriting it from the host.
+    monkeypatch.setattr(settings, "app_env", "testing")
 
 
 @pytest.fixture(autouse=True)

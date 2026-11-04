@@ -118,8 +118,8 @@ function refreshAccessToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
-async function request<T>(path: string, init: RequestInit & { query?: Record<string, string | number | boolean | undefined> } = {}, isRetry = false): Promise<T> {
-  const { query, headers: extraHeaders, ...rest } = init as any;
+async function request<T>(path: string, init: RequestInit & { query?: Record<string, string | number | boolean | undefined>; timeoutMs?: number } = {}, isRetry = false): Promise<T> {
+  const { query, headers: extraHeaders, timeoutMs, ...rest } = init as any;
   let url = `${BASE}${path}`;
   if (query) {
     const qs = new URLSearchParams();
@@ -137,11 +137,19 @@ async function request<T>(path: string, init: RequestInit & { query?: Record<str
   if (rest.body instanceof FormData) delete (headers as any)["Content-Type"];
 
   // Cap hung sockets so auth boot (and every other call) cannot wait forever.
-  // Callers may still pass their own AbortSignal.
+  // Callers may still pass their own AbortSignal, and may raise the cap with
+  // `timeoutMs` when the server does genuinely slow work.
+  //
+  // The default is 20 s because ordinary reads answer in milliseconds. It is
+  // wrong for uploads: `POST /ingest/image` runs OCR inside the request, and a
+  // 48 MP phone page takes about 37 s. At the old hard 20 s the browser aborted
+  // mid-read, nginx logged 499, the screen showed a failure — while the server
+  // went on to stage a perfectly good job nobody ever saw. Uploads therefore
+  // ask for a longer budget (`postForm` below) instead of being cut off.
   const signal =
     (rest as RequestInit).signal ??
     (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
-      ? AbortSignal.timeout(20_000)
+      ? AbortSignal.timeout(timeoutMs ?? 20_000)
       : undefined);
   const res = await fetch(url, { ...rest, headers, signal });
   const text = await res.text();
@@ -217,7 +225,14 @@ export const api = {
   get: <T>(path: string, query?: Record<string, any>, init?: RequestInit) => request<T>(path, { method: "GET", query, ...init }),
   post: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined, ...init }),
-  postForm: <T>(path: string, form: FormData, init?: RequestInit) => request<T>(path, { method: "POST", body: form as any, ...init }),
+  /**
+   * Multipart upload. Gets three minutes rather than the 20 s read cap: photo
+   * ingestion answers only after the OCR engine has finished (about 37 s for a
+   * 48 MP page, longer on a slow machine), and cutting that off turned every
+   * photo upload into a failure the server had actually completed.
+   */
+  postForm: <T>(path: string, form: FormData, init?: RequestInit) =>
+    request<T>(path, { method: "POST", body: form as any, timeoutMs: 180_000, ...init }),
   patch: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined, ...init }),
   delete: <T>(path: string, init?: RequestInit) => request<T>(path, { method: "DELETE", ...init }),

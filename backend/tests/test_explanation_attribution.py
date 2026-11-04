@@ -386,7 +386,10 @@ def test_the_migration_chain_has_one_head_and_covers_this_column() -> None:
 
     assert adds_column, "no migration adds forecast_explanations.attribution_source"
     heads = set(parents) - {p for already in parents.values() for p in already}
-    assert heads == {"020_explanation_attribution"}, f"revision heads: {sorted(heads)}"
+    # The chain grows, so the head is not pinned by name: migrations after 020
+    # are expected. What must hold is that there is exactly one head, and that
+    # 020 is an ancestor of it and so is applied by ``alembic upgrade head``.
+    assert len(heads) == 1, f"revision heads: {sorted(heads)}"
 
     # Every parent must exist, and everything must hang off that head: a
     # revision outside the applied history is never run by ``alembic upgrade
@@ -396,14 +399,15 @@ def test_the_migration_chain_has_one_head_and_covers_this_column() -> None:
     # rather than treating a re-visit as a cycle.
     assert all(p in parents for chain in parents.values() for p in chain), "dangling down_revision"
     seen: set[str] = set()
-    stack = ["020_explanation_attribution"]
+    stack = [heads.pop()]
     while stack:
         node = stack.pop()
         if node in seen:
             continue
         seen.add(node)
         stack.extend(parents.get(node, ()))
-    assert seen == set(parents), f"unreachable: {sorted(set(parents) - seen)}"
+    assert seen == set(parents), f"unreachable from head: {sorted(set(parents) - seen)}"
+    assert "020_explanation_attribution" in seen, "020 is not applied by upgrade head"
 
 
 # ------------------------------------------------------------ persistence

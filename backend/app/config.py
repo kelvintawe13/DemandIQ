@@ -153,8 +153,10 @@ class Settings(BaseSettings):
         default=25_000_000,
         ge=1_000_000,
         description=(
-            "Reject images above this pixel count before decoding/OCR, so a "
-            "small compressed file cannot expand into a decompression bomb."
+            "Working size for OCR: an upload larger than this is downscaled before "
+            "thresholding and recognition, not refused. A 48-50 MP phone photo is "
+            "about 0.8 MB and is read normally. Abuse is bounded separately by a "
+            "fixed decompression-bomb ceiling (100 MP), far above any camera."
         ),
     )
     ocr_timeout_seconds: float = Field(
