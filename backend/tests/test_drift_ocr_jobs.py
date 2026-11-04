@@ -169,6 +169,19 @@ def test_parse_ocr_text_recovers_a_seven_read_as_slash() -> None:
     assert rows[0]["confidence"] < 0.9
 
 
+def test_parse_ocr_text_never_reads_the_year_as_the_count() -> None:
+    """A year that drifted away from its date is not that day's visitor count.
+
+    A dash between the month and the year stops the date pattern before ``2026``,
+    which was then left on the line as the nearest integer and staged as the
+    day's demand. On the measured 21-day page two days came back as 2026
+    visitors — figures that look ordinary in the review list.
+    """
+    rows = parse_ocr_text("19 Oct — 2026   44", reporting_year=2026)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [("2026-10-19", 44)]
+
+
 def test_parse_ocr_text_skips_lines_without_both_fields() -> None:
     # No date on the first line, no count on the second — neither is guessed at.
     rows = parse_ocr_text("Total covers 112\n14/01/2026   --")

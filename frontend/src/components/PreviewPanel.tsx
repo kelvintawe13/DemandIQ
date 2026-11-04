@@ -31,6 +31,8 @@ interface ExtractedRow {
   readers?: number | null;
   /** Share of those reads that produced the figure kept (1 = unanimous). */
   agreement?: number | null;
+  /** Count far from the rest of the page — the shape a dropped digit leaves. */
+  outlier?: boolean | null;
 }
 
 interface PreviewPanelProps {
@@ -51,6 +53,8 @@ interface EditingRow {
   /** Independent reads that found this date, and the share that agreed on it. */
   readers?: number | null;
   agreement?: number | null;
+  /** True when the figure sits far outside the rest of the page's days. */
+  outlier?: boolean | null;
 }
 
 interface ImageJobResponse {
@@ -125,12 +129,27 @@ function isContested(row: EditingRow): boolean {
   return row.agreement != null && row.agreement < 1;
 }
 
-/** How the disagreement reads in words, e.g. "2 of 3 readings agree". */
+/**
+ * Whether the figure sits far outside the rest of the page.
+ *
+ * Agreement cannot catch the case every read got wrong the same way: on the
+ * measured page the day of 41 visitors was transcribed as `4` by every pass, so
+ * the row was unanimous and wrong at once. The page is the evidence left — its
+ * days are of similar size — and the server marks the rows that are not.
+ */
+function isOutlier(row: EditingRow): boolean {
+  return row.outlier === true;
+}
+
+/** How the doubt reads in words, e.g. "2 of 3 readings agree". */
 function doubtLabel(row: EditingRow): string | null {
-  if (!isContested(row)) return null;
-  const readers = row.readers ?? 0;
-  const agreeing = Math.max(1, Math.round((row.agreement ?? 1) * readers));
-  return `${agreeing} of ${readers} readings agree`;
+  if (isContested(row)) {
+    const readers = row.readers ?? 0;
+    const agreeing = Math.max(1, Math.round((row.agreement ?? 1) * readers));
+    return `${agreeing} of ${readers} readings agree`;
+  }
+  if (isOutlier(row)) return 'Far from the other days — check';
+  return null;
 }
 
 /** Position of a highlight box over the photo, from an OCR box in fractions. */
@@ -169,6 +188,8 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   /** The row the operator is on, so its highlights are the pointed-at ones. */
   const [activeRow, setActiveRow] = useState<number | null>(null);
+  /** The scrollable row list, so a newly added row can be scrolled into view. */
+  const rowListRef = useRef<HTMLUListElement | null>(null);
 
   /** The job the panel is showing now; a late response for an older one is ignored. */
   const jobIdRef = useRef<string | null>(jobId ?? null);
@@ -222,14 +243,21 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
         confidence: r.confidence ?? null,
         boxes: r.boxes ?? null,
         readers: r.readers ?? null,
-        agreement: r.agreement ?? null
+        agreement: r.agreement ?? null,
+        outlier: r.outlier ?? null
       }));
       // Rows the readings disagreed on come first: the operator should meet the
       // doubtful figures before the clean ones. Sorted once, when the job loads
       // — not on every edit, which would move a row out from under the cursor
       // mid-correction. `sort` is stable, so page order survives inside each
       // group.
-      setEditingRows([...editable].sort((a, b) => Number(isContested(b)) - Number(isContested(a))));
+      setEditingRows(
+        [...editable].sort(
+          (a, b) =>
+            Number(isContested(b)) - Number(isContested(a)) ||
+            Number(isOutlier(b)) - Number(isOutlier(a)),
+        ),
+      );
       // if rows empty but status not committed, keep polling maybe
       if (rows.length === 0 && res.status !== 'committed') {
         // OCR returned no readable rows; nothing to poll for.
@@ -362,10 +390,45 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
     });
   };
 
+  /** Drop one row. The photo's rows are a starting point, not a fixed list. */
+  const removeRow = (idx: number) => {
+    setEditingRows((cur) => cur.filter((_, i) => i !== idx));
+    setActiveRow(null);
+  };
+
+  /**
+   * Append an empty row and put the cursor in it.
+   *
+   * The row list is a scroll box with a height limit, so a row appended to the
+   * end landed out of sight: the click looked like it did nothing, which is how
+   * "Add row" was reported as broken. The list is scrolled to the new row and
+   * its date field focused, so the operator types straight into it.
+   *
+   * The date starts as today only when today is not already on the list —
+   * pre-filling a day that is there would only create the duplicate the panel
+   * then warns about.
+   */
+  const addRow = () => {
+    setEditingRows((cur) => {
+      const used = new Set(cur.map((row) => row.date));
+      const today = todayISO();
+      return [...cur, { date: used.has(today) ? '' : today, demand_qty: 0, handAdded: true }];
+    });
+    requestAnimationFrame(() => {
+      const list = rowListRef.current;
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+      const dates = list.querySelectorAll<HTMLInputElement>('input[type="date"]');
+      dates[dates.length - 1]?.focus();
+    });
+  };
+
   /** Rows the engine flagged, or that the parser found ambiguous. */
   const flaggedRows = editingRows.filter((row) => scoreNote(engine, row).flagged);
   /** Rows where independent reads of the same photo disagreed. */
   const contestedRows = editingRows.filter(isContested);
+  /** Rows whose figure is unlike the rest of the page, and not already disputed. */
+  const outlierRows = editingRows.filter((row) => isOutlier(row) && !isContested(row));
 
   /**
    * Dates entered more than once. The commit upserts on (location, date), so only
@@ -548,8 +611,9 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                       />
                       <button
                         type="button"
-                        onClick={() => setEditingRows((c) => c.filter((_, i) => i !== idx))}
-                        className="rounded-md px-2 py-1 text-caption text-red-600 hover:bg-red-50"
+                        onClick={() => removeRow(idx)}
+                        aria-label={`Remove row ${idx + 1}`}
+                        className="shrink-0 rounded-md px-2 py-1 text-caption text-red-600 hover:bg-red-50"
                       >
                         Remove
                       </button>
@@ -557,9 +621,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                   ))}
                   <button
                     type="button"
-                    onClick={() =>
-                      setEditingRows((c) => [...c, { date: todayISO(), demand_qty: 0, handAdded: true }])
-                    }
+                    onClick={addRow}
                     className="self-start rounded-lg border border-slate-300 px-3 py-1.5 text-caption font-medium text-slate-700 hover:bg-slate-50"
                   >
                     + Add row
@@ -619,6 +681,20 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                   photo before importing.
                 </p>
               )}
+              {outlierRows.length > 0 && (
+                <p
+                  role="note"
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-caption leading-relaxed text-amber-900"
+                >
+                  <span className="font-semibold">
+                    {outlierRows.length} row{outlierRows.length === 1 ? '' : 's'} far from the other
+                    days
+                  </span>{' '}
+                  — every read agreed on these figures, so nothing else marks them, but they sit
+                  outside the range this page's days occupy. A dropped digit looks exactly like this;
+                  compare them with the photo before importing.
+                </p>
+              )}
               {flaggedRows.length > 0 && (
                 <p
                   role="note"
@@ -634,6 +710,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
               {/* The rows scroll inside the panel so a 100-row photo does not
                   push the confirm controls and the whole page down with it. */}
               <ul
+                ref={rowListRef}
                 aria-label="Extracted rows"
                 tabIndex={0}
                 className="touch-scroll flex max-h-[420px] flex-col divide-y divide-slate-100 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
@@ -691,6 +768,17 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
                           Same date twice
                         </span>
                       )}
+                      {/* The rows can be corrected and dropped, not just read:
+                          one misread day should not have to be imported. */}
+                      <button
+                        type="button"
+                        onClick={() => removeRow(idx)}
+                        disabled={commitLoading}
+                        aria-label={`Remove row ${idx + 1}`}
+                        className="ml-auto shrink-0 rounded-md px-2 py-1 text-caption font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
                     </li>
                   );
                 })}
@@ -698,9 +786,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
               <div>
                 <button
                   type="button"
-                  onClick={() =>
-                    setEditingRows((c) => [...c, { date: todayISO(), demand_qty: 0, handAdded: true }])
-                  }
+                  onClick={addRow}
                   className="rounded-lg border border-slate-300 px-3 py-1.5 text-caption font-medium text-slate-700 hover:bg-slate-50"
                 >
                   + Add row

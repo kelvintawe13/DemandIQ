@@ -30,6 +30,7 @@ import json
 import logging
 import math
 import re
+import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -298,8 +299,7 @@ def validate_image_upload(content: bytes, filename: str | None = None) -> ImageI
 class _Preprocess:
     """How the image handed to Tesseract relates to the upload.
 
-    Tesseract's 
-      are in the coordinates of the straightened, upscaled,
+    Tesseract's boxes are in the coordinates of the straightened, upscaled,
     padded copy it read, not of the photo the operator is looking at. The review
     screen draws its highlights on the photo, so those boxes have to be mapped
     back through every step this module applied.
@@ -401,9 +401,7 @@ def _preprocess(content: bytes) -> tuple[Any, _Preprocess]:
     # ``_Preprocess`` so a highlight still lands where the operator can see it.
     if width * height > max_pixels:
         factor = math.sqrt(max_pixels / (width * height))
-        image = image.resize(
-            (max(1, int(width * factor)), max(1, int(height * factor))), resample
-        )
+        image = image.resize((max(1, int(width * factor)), max(1, int(height * factor))), resample)
         width, height = image.size
         scale = width / source_size[0] if source_size[0] else 1.0
     shortest = min(width, height)
@@ -685,37 +683,71 @@ def _preceding_word(line: str, start: int) -> str:
     return line[index + 1 : end].strip(".#:\u2013-").lower()
 
 
-def _count_candidates(
-    line: str, date_span: tuple[int, int]
-) -> list[tuple[int, int, int, int, bool]]:
-    """Every integer on the line that could be the demand count.
+@dataclass(frozen=True, slots=True)
+class _CountCandidate:
+    """One integer on the line that could be the day's demand count."""
 
-    Each entry is ``(value, distance_to_date, start, end, corrected)``, ordered
-    nearest the date first. Integers inside the date are not candidates, and a
-    number directly preceded by an annotation label ("Table 6", "tips 3") is
-    not a count either — taking it was how a table number became a visitor
-    count and got committed as one.
+    value: int
+    start: int
+    end: int
+    # Digits attached to letters ("B20", "2G") are a misread token, not a
+    # number: the digits are whatever the engine made of a stroke it could not
+    # name. Such a candidate is still usable when nothing cleaner is on the line,
+    # but it must lose to a clean count beside it.
+    glued: bool
+    # A terminal 7 read as a slash or an ``F`` ("2/" and "2F" are both 27).
+    corrected: bool
+
+
+def _count_candidates(line: str, date_span: tuple[int, int]) -> list[_CountCandidate]:
+    """Every integer on the line that could be the demand count, best first.
+
+    Ordered by how trustworthy each candidate is: a clean number nearest the
+    date wins, and a token with letters stuck to its digits is demoted. Integers
+    inside the date are not candidates, and a number directly preceded by an
+    annotation label ("Table 6", "tips 3") is not a count either — taking it was
+    how a table number became a visitor count and got committed as one.
+
+    A token whose leading four digits are a calendar year is never a count. A
+    hand-written log writes the year as its own word often enough ("19 Oct —
+    2026") that the date pattern stops before it, and the nearest-integer rule
+    then staged 2026 visitors for that day — a wrong figure that looks ordinary
+    in the review list. Measured on the 21-day page: two days came back as 2026
+    before this rule.
     """
-    candidates: list[tuple[int, int, int, int, bool]] = []
+    candidates: list[_CountCandidate] = []
     for match in _INT.finditer(line):
         start, end = match.span()
         if date_span[0] <= start < date_span[1]:
             continue
         if _preceding_word(line, start) in _ANNOTATION_LABELS:
             continue
-        value = int(match.group(1))
+        digits = match.group(1)
+        if len(digits) >= 4 and 1900 <= int(digits[:4]) <= 2099:
+            continue
+        value = int(digits)
         corrected = False
         # Tesseract frequently reads a terminal 7 as '/' when it ends a count
         # ("2/" is 27). Only the single-digit form is corrected, and only when
         # no further digit follows: "2/05" is a date fragment, not 27.
-        if len(match.group(1)) == 1 and end < len(line) and line[end] in _TRAILING_SEVEN_GLYPHS:
+        if len(digits) == 1 and end < len(line) and line[end] in _TRAILING_SEVEN_GLYPHS:
             if end + 1 >= len(line) or not line[end + 1].isdigit():
                 value = value * 10 + 7
                 corrected = True
                 end += 1
-        distance = min(abs(start - date_span[1]), abs(date_span[0] - end))
-        candidates.append((value, distance, start, end, corrected))
-    candidates.sort(key=lambda candidate: (candidate[1], candidate[2]))
+        glued = not corrected and bool(
+            (start and line[start - 1].isalpha()) or (end < len(line) and line[end].isalpha())
+        )
+        candidates.append(
+            _CountCandidate(value=value, start=start, end=end, glued=glued, corrected=corrected)
+        )
+    candidates.sort(
+        key=lambda candidate: (
+            candidate.glued,
+            min(abs(candidate.start - date_span[1]), abs(date_span[0] - candidate.end)),
+            candidate.start,
+        )
+    )
     return candidates
 
 
@@ -738,15 +770,17 @@ def _parse_lines(
         candidates = _count_candidates(line, span)
         if not candidates:
             continue
-        demand_qty, _, count_start, count_end, corrected = candidates[0]
+        chosen = candidates[0]
+        demand_qty = chosen.value
         # A readability signal, not a calibrated probability. One candidate means
         # the count was unambiguous; several means the nearest to the date was
-        # chosen for the operator, which is a guess worth flagging. The remote
-        # service supplies its own real score instead — `engine` on the preview
-        # records which of the two this is.
+        # chosen for the operator, which is a guess worth flagging. A count taken
+        # out of a misread token, or a 7 restored by the trailing-glyph rule, is a
+        # guess too. The remote service supplies its own real score instead —
+        # `engine` on the preview records which of the two this is.
         confidence = (
             CONFIDENCE_UNAMBIGUOUS_LINE
-            if len(candidates) == 1 and not corrected
+            if len(candidates) == 1 and not chosen.corrected and not chosen.glued
             else CONFIDENCE_AMBIGUOUS_LINE
         )
         parsed.append(
@@ -757,7 +791,7 @@ def _parse_lines(
                 demand_qty=demand_qty,
                 confidence=confidence,
                 date_span=span,
-                count_span=(count_start, count_end),
+                count_span=(chosen.start, chosen.end),
             )
         )
     return parsed
@@ -1327,6 +1361,16 @@ def _merge_reads(reads: list[_Read]) -> tuple[list[dict[str, Any]], int]:
     that read's line was — so evidence about the record is reported separately
     rather than folded into a number that already has a meaning.
     """
+    # A date that any line read paired with a count is settled by those reads.
+    # The position-grouped reconstruction exists for a sheet whose columns the
+    # engine split, and on a page its own lines already carry it can pair a row's
+    # date with the next row's count: on the measured 21-day page those votes
+    # turned thirteen correct rows into eleven. Cells votes still decide every
+    # date no line read found, which is the column-ordered sheet they are for.
+    line_dates = {
+        str(row.get("date")) for read in reads if read.source == "lines" for row in read.rows
+    }
+
     votes: dict[str, list[tuple[dict[str, Any], _Read]]] = {}
     for read in reads:
         already_voted: set[str] = set()
@@ -1334,6 +1378,8 @@ def _merge_reads(reads: list[_Read]) -> tuple[list[dict[str, Any]], int]:
             date = str(row.get("date"))
             if not date or date in already_voted:
                 # One read gets one vote per date, however many times it split it.
+                continue
+            if read.source != "lines" and date in line_dates:
                 continue
             already_voted.add(date)
             votes.setdefault(date, []).append((row, read))
@@ -1361,6 +1407,52 @@ def _merge_reads(reads: list[_Read]) -> tuple[list[dict[str, Any]], int]:
         row["agreement"] = round(len(group) / len(votes[date]), 2)
         merged.append(row)
     return merged, disagreements
+
+
+# How far a day may sit from the page's typical figure before it is worth the
+# operator's attention. A log's daily counts cluster, so a digit the engine
+# dropped ("41" read as "4") lands far outside that cluster — and when every
+# read made the same mistake, no agreement figure on the row shows it.
+_OUTLIER_MAD_FACTOR = 3.0
+_OUTLIER_MIN_ROWS = 5
+
+
+def _flag_implausible_counts(rows: list[dict[str, Any]]) -> int:
+    """Mark rows whose count sits far outside the rest of the page.
+
+    Merging settles rows the reads argued over, but it cannot see the case they
+    all agreed on and all got wrong: on the measured 21-day page every read
+    transcribed the day of 41 visitors as ``4``, so the row was unanimous and
+    wrong at once. The page itself is the remaining evidence — counts on one log
+    are of similar size, so a figure far below (or above) the rest is worth a
+    second look before it is committed.
+
+    The centre is the median and the spread the median absolute deviation, so a
+    single bad day cannot move the band that judges it. Fewer than five rows is
+    too small a sample to say what this page's days look like, and nothing is
+    marked on such a page.
+
+    Returns how many rows were marked.
+    """
+    quantities = sorted(int(row.get("demand_qty") or 0) for row in rows)
+    if len(quantities) < _OUTLIER_MIN_ROWS:
+        return 0
+    median = statistics.median(quantities)
+    spread = statistics.median(abs(value - median) for value in quantities)
+    # Days that are all near-identical give a deviation of zero, which would
+    # make every row an outlier; a tenth of the median is the smallest spread
+    # this rule will believe. A quiet page therefore tolerates real variation
+    # rather than flagging its normal days.
+    spread = max(spread, float(median) * 0.1, 1.0)
+    low = median - _OUTLIER_MAD_FACTOR * spread
+    high = median + _OUTLIER_MAD_FACTOR * spread
+    marked = 0
+    for row in rows:
+        value = int(row.get("demand_qty") or 0)
+        if value < low or value > high:
+            row["outlier"] = True
+            marked += 1
+    return marked
 
 
 def _binarise(gray: Any) -> Any:
@@ -1484,8 +1576,6 @@ def _tesseract_extraction(
         ImageValidationError: If the image cannot be decoded.
         RuntimeError: If every segmentation mode fails at the engine level.
     """
-    import pytesseract
-
     import os
     from concurrent.futures import ThreadPoolExecutor
 
@@ -1559,6 +1649,7 @@ def _tesseract_extraction(
         )
 
     rows, disagreements = _merge_reads(reads)
+    outliers = _flag_implausible_counts(rows)
     anchor = max(reads, key=lambda read: (len(read.rows), read.mean_confidence or 0.0))
     return ImageExtraction(
         rows=rows,
@@ -1577,6 +1668,7 @@ def _tesseract_extraction(
             "reads": len(reads),
             "variants": sorted({read.variant for read in reads}),
             "read_disagreements": disagreements,
+            "outlier_rows": outliers,
         },
     )
 

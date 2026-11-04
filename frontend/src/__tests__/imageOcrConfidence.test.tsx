@@ -205,6 +205,68 @@ describe('OCR readings', () => {
     expect(screen.queryByText(/readings disagreed/)).toBeNull();
   });
 
+  it('calls out a figure far from the rest of the page', async () => {
+    // Every read agreed on 4, so no agreement figure can show the mistake — the
+    // day was 41. The page itself is the remaining evidence, and the row is
+    // listed first so the operator meets it before the clean ones.
+    const outlier = {
+      row_index: 0,
+      date: '2026-10-06',
+      demand_qty: 4,
+      confidence: 0.9,
+      readers: 3,
+      agreement: 1,
+      outlier: true,
+    };
+    serveJob('tesseract', [unanimous, outlier]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Far from the other days — check')).toBeInTheDocument(),
+    );
+    expect(screen.getByText('1 row far from the other days')).toBeInTheDocument();
+
+    const dateFields = screen.getAllByLabelText(/Date for row \d+/);
+    expect(dateFields.map((field) => (field as HTMLInputElement).value)).toEqual([
+      '2026-10-06',
+      '2026-10-02',
+    ]);
+  });
+
+  it('lets a misread row be removed before importing', async () => {
+    serveJob('tesseract', [
+      { row_index: 0, date: '2026-10-15', demand_qty: 24, confidence: 0.9 },
+      { row_index: 1, date: '2026-10-02', demand_qty: 28, confidence: 0.9 },
+    ]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    await waitFor(() => expect(screen.getByLabelText('Visitors for row 2')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Remove row 1' }));
+
+    // The remaining row is the one that was second, and it keeps its figure:
+    // removing a day must not renumber the values.
+    await waitFor(() => expect(screen.getAllByLabelText(/Date for row \d+/)).toHaveLength(1));
+    expect(screen.getByLabelText('Visitors for row 1')).toHaveValue(28);
+    expect(screen.queryByRole('button', { name: 'Remove row 2' })).toBeNull();
+  });
+
+  it('adds a row the operator can type into', async () => {
+    serveJob('tesseract', [
+      { row_index: 0, date: '2026-10-02', demand_qty: 28, confidence: 0.9 },
+    ]);
+    render(<PreviewPanel imageName="log.jpg" jobId="job-1" />);
+
+    const addButton = await screen.findByRole('button', { name: /\+ Add row/ });
+    fireEvent.click(addButton);
+    await waitFor(() => expect(screen.getByLabelText('Visitors for row 2')).toBeInTheDocument());
+
+    // Adding again must not pre-fill a day that is already on the list — that
+    // only creates the duplicate the panel then has to warn about.
+    fireEvent.click(screen.getByRole('button', { name: /\+ Add row/ }));
+    await waitFor(() => expect(screen.getByLabelText('Visitors for row 3')).toBeInTheDocument());
+    expect(screen.getByLabelText('Date for row 3')).toHaveValue('');
+  });
+
   it('leaves a vision model score to speak for itself', async () => {
     // A remote service returns one read of the page: there is no merge to report,
     // so no agreement is invented for it.

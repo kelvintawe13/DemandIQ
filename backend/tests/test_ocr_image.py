@@ -649,3 +649,77 @@ def test_a_trailing_seven_read_as_a_letter_is_still_a_seven() -> None:
 
     # Not a licence to glue an F onto a digit mid-token or to a real unit.
     assert parse_ocr_text("8 Oct  F2", day_first=True, reporting_year=2026)[0]["demand_qty"] == 2
+
+
+def _cells_read(date: str, qty: int, *, psm: int = 11, conf: float = 0.77):
+    """A read from the position-grouped reconstruction rather than engine lines."""
+    line_read = _read(date, qty, psm=psm, conf=conf, variant="binarised")
+    return _Read(
+        rows=line_read.rows,
+        source="cells",
+        variant=line_read.variant,
+        psm=line_read.psm,
+        mean_confidence=line_read.mean_confidence,
+    )
+
+
+def test_a_position_grouped_read_does_not_overrule_a_line_read() -> None:
+    """Cells exist for column-ordered sheets, not to re-pair a page read as lines.
+
+    On the measured 21-day hand-written page the position-grouped reconstruction
+    paired some dates with the next row's count — 15 Oct came back as 24 instead
+    of 29, 18 Oct as 34 instead of 39. Those votes are more confident than the
+    line reads they contradicted, so they won the tie-break and turned thirteen
+    correct rows into eleven.
+    """
+    reads = [_read("2026-10-15", 29, psm=4, conf=0.60), _cells_read("2026-10-15", 24)]
+
+    rows, disagreements = _merge_reads(reads)
+
+    assert rows[0]["demand_qty"] == 29
+    # One read voted, so the screen does not claim a second opinion backed it.
+    assert rows[0]["readers"] == 1
+    assert disagreements == 0
+
+
+def test_a_count_far_from_the_rest_of_the_page_is_flagged() -> None:
+    """A unanimous misread still has to be visible before it is committed.
+
+    On the measured page every read transcribed the day of 41 visitors as ``4``,
+    so the merge reported unanimity and the row looked clean. The page is the
+    evidence left: its days are of similar size, so 4 among 27-52 is not a quiet
+    day, it is a dropped digit.
+    """
+    from app.services.ingestion.image import _flag_implausible_counts
+
+    rows = [{"demand_qty": qty} for qty in (34, 28, 45, 50, 32, 41, 38, 27, 46, 52, 49, 4)]
+
+    marked = _flag_implausible_counts(rows)
+
+    assert marked == 1
+    flagged = next(row for row in rows if row.get("outlier"))
+    assert flagged["demand_qty"] == 4
+    # An ordinary day is left alone: a badge on every row is a badge on none.
+    assert all(not row.get("outlier") for row in rows if row["demand_qty"] != 4)
+
+
+def test_a_page_too_short_to_judge_flags_nothing() -> None:
+    """Three rows cannot say what this page's days look like."""
+    from app.services.ingestion.image import _flag_implausible_counts
+
+    rows = [{"demand_qty": qty} for qty in (40, 41, 3)]
+
+    assert _flag_implausible_counts(rows) == 0
+    assert all(not row.get("outlier") for row in rows)
+
+
+def test_a_position_grouped_read_still_covers_a_date_no_line_read_found() -> None:
+    """The fallback is kept for the sheet it exists for: columns the lines split."""
+    reads = [_read("2026-10-02", 28, psm=6, conf=0.55), _cells_read("2026-10-11", 49)]
+
+    rows, _ = _merge_reads(reads)
+
+    assert [(row["date"], row["demand_qty"]) for row in rows] == [
+        ("2026-10-02", 28),
+        ("2026-10-11", 49),
+    ]
