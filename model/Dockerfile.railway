@@ -13,6 +13,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# lightgbm links libgomp (OpenMP); without it unpickling a bundle fails with
+# "libgomp.so.1: cannot open shared object file" even though the wheel installed.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Serving a bundle needs only the base dependencies (joblib). The full pipeline
 # (lightgbm, catboost, xgboost, scikit-learn, shap) is ~1 GB and is only needed
 # to retrain inside this service, so it is opt-in: set INSTALL_TRAINING=1.

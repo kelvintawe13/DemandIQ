@@ -92,7 +92,15 @@ _DEFAULT_BUNDLE_CANDIDATES = DEFAULT_BUNDLE_CANDIDATES
 
 
 def _resolve_bundle_path() -> Path | None:
-    """Explicit MODEL_BUNDLE_PATH wins; otherwise probe the default run path."""
+    """MODEL_BUNDLE_URL wins, then MODEL_BUNDLE_PATH, then the default run path.
+
+    The URL is the live source (the model service's volume) and the path is what
+    the image ships, so a published retrain reaches forecasts without a rebuild
+    while a failed fetch still leaves a trained model answering.
+    """
+    remote = _remote_bundle()
+    if remote is not None:
+        return remote
     try:
         configured = get_settings().model_bundle_path
     except Exception:  # noqa: BLE001 - serving must degrade; settings are import-safe
@@ -109,9 +117,6 @@ def _resolve_bundle_path() -> Path | None:
             " unless a default location has one",
             path,
         )
-    remote = _remote_bundle()
-    if remote is not None:
-        return remote
     for candidate in _DEFAULT_BUNDLE_CANDIDATES:
         path = Path(candidate)
         if path.exists():
@@ -260,8 +265,11 @@ def serving_status() -> dict[str, Any]:
     configured = (get_settings().model_bundle_path or "").strip() or None
     bundle = get_bundle()
     served = _resolve_bundle_path()
+    # When the model service supplied the bundle, the local path is a fallback
+    # rather than a declaration, so a stale path must not fail the healthcheck.
+    from_remote = _remote_bundle() is not None
 
-    if configured:
+    if configured and not from_remote:
         resolved_configured = Path(configured).expanduser().resolve()
         if bundle is None or served is None or served.resolve() != resolved_configured:
             return {

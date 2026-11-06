@@ -93,11 +93,11 @@ class Settings(BaseSettings):
     model_bundle_url: str | None = Field(
         default=None,
         description=(
-            "Optional HTTP source for the serving bundle, used when "
-            "MODEL_BUNDLE_PATH is not set: the export is downloaded once at "
-            "startup and then loaded like any other bundle. This is how the "
-            "model service's volume reaches the API. The export shipped in the "
-            "image remains the fallback when the download fails."
+            "Optional HTTP source for the serving bundle: the export is "
+            "downloaded once at startup and then loaded like any other bundle. "
+            "This is how the model service's volume reaches the API, so it is "
+            "preferred over MODEL_BUNDLE_PATH; the export shipped in the image "
+            "remains the fallback when the download fails."
         ),
     )
     default_coverage: float = Field(default=0.90, ge=0.5, le=0.99)

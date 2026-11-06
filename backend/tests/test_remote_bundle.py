@@ -90,10 +90,11 @@ def _isolate(
     tmp_path: Path,
     url: str | None,
     shipped: Path | None = None,
+    path: Path | None = None,
 ) -> Path:
-    """Point the loader at ``url`` only, optionally with a shipped fallback."""
+    """Point the loader at ``url``, optionally with a path and a shipped fallback."""
     cache = tmp_path / "cache" / "serving_bundle.joblib"
-    monkeypatch.setattr(get_settings(), "model_bundle_path", None)
+    monkeypatch.setattr(get_settings(), "model_bundle_path", str(path) if path else None)
     monkeypatch.setattr(get_settings(), "model_bundle_url", url)
     monkeypatch.setattr(bundle_mod, "REMOTE_BUNDLE_CACHE", cache)
     monkeypatch.setattr(
@@ -170,6 +171,35 @@ def test_a_bad_download_is_rejected_and_discarded(
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_the_served_source_wins_over_the_path_in_the_image(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served: _Source
+) -> None:
+    # This is the deployed shape: MODEL_BUNDLE_URL (the volume) and
+    # MODEL_BUNDLE_PATH (the export baked into the image) are both set.
+    shipped = _write_bundle(tmp_path / "image" / "serving_bundle.joblib", version="shipped-1")
+    cache = _isolate(monkeypatch, tmp_path, served.url, shipped=shipped, path=shipped)
+
+    status = serving_status()
+
+    assert status["mode"] == "trained"
+    assert status["path"] == str(cache)
+    assert status["version"] == "remote-1"
+
+
+def test_a_stale_path_does_not_fail_the_healthcheck_when_the_source_serves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served: _Source
+) -> None:
+    # A path that is no longer loadable must not be reported as a configuration
+    # error while the model service is answering: the volume is the live source.
+    missing = tmp_path / "image" / "gone.joblib"
+    _isolate(monkeypatch, tmp_path, served.url, path=missing)
+
+    status = serving_status()
+
+    assert status["mode"] == "trained"
+    assert status["reason"] is None
 
 
 def test_the_fetch_happens_once_per_process(
