@@ -37,7 +37,7 @@ It never deletes.
 
 Usage:
     backend/.venv/bin/python backend/scripts/seed_demo_data.py
-    backend/.venv/bin/python backend/scripts/seed_demo_data.py --workspace "DemandIQ Demo"
+    backend/.venv/bin/python backend/scripts/seed_demo_data.py --workspace "<name or id>"
 """
 
 from __future__ import annotations
@@ -59,9 +59,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import get_settings
 from app.security.hashing import hash_password
 
+# The two locations a fresh workspace gets, matching the local demo. Any
+# non-empty workspace is left exactly as it is.
+DEMO_LOCATIONS: list[tuple[str, str, str, int, str]] = [
+    # (name, area, cuisine, seating_capacity, district)
+    ("Kigali Heights Bistro", "Kigali Heights", "Rwandan", 80, "Gasabo"),
+    ("Remera Grill", "Remera", "Grill", 45, "Gasabo"),
+]
+
 # The workspace this seeds into, resolved below. The seat accounts live here, so
-# the data has to live here too.
-DEFAULT_WORKSPACE_HINT = "DemandIQ Demo"
+# the data has to live here too. There is deliberately no default NAME: the
+# workspace is created by seed_site_admin.py ("DemandIQ HQ"), and hard-coding a
+# name here made this script silently seed nothing once that name changed.
 
 # Deterministic so two runs produce the same demo and screenshots stay stable.
 # Not a security context: this only jitters demo timestamps and volumes.
@@ -386,7 +395,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Seed rich demo data for empty screens.")
     parser.add_argument(
         "--workspace",
-        default=os.environ.get("DEMO_WORKSPACE") or DEFAULT_WORKSPACE_HINT,
+        default=os.environ.get("DEMO_WORKSPACE"),
         help="Workspace name or id to seed (default: the demo workspace)",
     )
     args = parser.parse_args()
@@ -414,7 +423,36 @@ def main() -> None:
             {"w": ws_id},
         )
         if not locations:
-            raise SystemExit("No locations in this workspace; nothing to attach data to.")
+            # A freshly migrated database has none, and no earlier script makes
+            # them: seed_site_admin seats the workspace and the users,
+            # seed_demo_roles seats the roles, and both need a location for this
+            # script to hang data on. Create the same two the local demo has, so
+            # a first deploy on a new host fills the same screens. Only runs when
+            # the workspace is empty, so re-running never duplicates them.
+            for name, area, cuisine, capacity, district in DEMO_LOCATIONS:
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO locations "
+                        "(workspace_id, name, area, cuisine, seating_capacity, "
+                        " service_type, district) "
+                        "VALUES (:w, :name, :area, :cuisine, :capacity, "
+                        "        'casual dining', :district)"
+                    ),
+                    {
+                        "w": ws_id,
+                        "name": name,
+                        "area": area,
+                        "cuisine": cuisine,
+                        "capacity": capacity,
+                        "district": district,
+                    },
+                )
+            print(f"Created {len(DEMO_LOCATIONS)} demo locations in {ws_name}.")
+            locations = _uuid_rows(
+                conn,
+                "SELECT id, name FROM locations WHERE workspace_id = :w ORDER BY created_at",
+                {"w": ws_id},
+            )
         rules = _uuid_rows(
             conn,
             "SELECT id, name FROM quality_rules WHERE workspace_id = :w",

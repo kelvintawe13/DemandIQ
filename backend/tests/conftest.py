@@ -65,6 +65,9 @@ def _no_serving_bundle_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.forecasting import bundle as bundle_mod
 
     monkeypatch.setattr(get_settings(), "model_bundle_path", None)
+    # A developer whose .env points the API at a model service must not make the
+    # suite reach for it; the fetch path has its own tests.
+    monkeypatch.setattr(get_settings(), "model_bundle_url", None)
     monkeypatch.setattr(bundle_mod, "_DEFAULT_BUNDLE_CANDIDATES", ())
     bundle_mod.clear_bundle_cache()
     yield

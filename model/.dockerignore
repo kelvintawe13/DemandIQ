@@ -1,0 +1,13 @@
+# The build context is model/. Training artifacts (69 MB) are not inputs to this
+# image: bundles arrive on the volume at runtime, not in the build.
+artifacts/
+figures/
+notebooks/
+tests/
+src/diq_model/__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

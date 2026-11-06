@@ -16,6 +16,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# What it takes to *read* an exported serving bundle: joblib has to unpickle the
+# LightGBM booster to validate it, so the model service installs this even when
+# it does not train. Matches the backend's `model` extra.
+serving = [
+    "lightgbm>=4.0.0",
+]
 # Heavy training deps: preinstalled on Colab, install locally only when needed.
 training = [
     "lightgbm>=4.0.0",

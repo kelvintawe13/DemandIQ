@@ -1,0 +1,34 @@
+# Model service: owns the exported serving bundles and serves them to the API
+# over Railway's private network (MODEL_BUNDLE_URL -> http://model.railway.internal:9000).
+#
+# Build context is `model/` (the service's root directory). The volume mounted at
+# /data is what makes a published bundle outlive a deploy.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=9000 \
+    BUNDLES_DIR=/data/bundles
+
+WORKDIR /app
+
+# Serving a bundle needs only the base dependencies (joblib). The full pipeline
+# (lightgbm, catboost, xgboost, scikit-learn, shap) is ~1 GB and is only needed
+# to retrain inside this service, so it is opt-in: set INSTALL_TRAINING=1.
+ARG INSTALL_TRAINING=0
+
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install -e ".[serving]" \
+    && if [ "$INSTALL_TRAINING" = "1" ]; then pip install -e ".[training]"; fi
+
+# Only needed to retrain here; harmless for serving.
+COPY scripts ./scripts
+COPY data ./data
+COPY serve_bundles.py ./
+
+RUN mkdir -p /data/bundles/latest /data/bundles/exports
+
+EXPOSE 9000
+CMD ["python", "serve_bundles.py"]

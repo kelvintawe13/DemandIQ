@@ -1,32 +1,37 @@
 /**
  * DemandIQ typed API client (VITE_API_URL-aware).
  *
- * - Base URL from `import.meta.env.VITE_API_URL` (docker-compose.yml:70)
- *   with fallback to http://localhost:8000.
+ * - Base URL from `import.meta.env.VITE_API_URL`, else the page's own origin.
  * - Attaches `Authorization: Bearer <token>` when a token is stored.
  * - Normalises the unified error shape `{error:{code,message,field,reference}}`.
  * - Exposes cursor-paginated helpers and typed domain calls:
  *   location / forecast / policy / quality / alert / report / webhook / governance.
- *
- * When `VITE_API_URL` is empty the caller can fall back to local mock data
- * (see `shouldUseMock()`).
  */
 
 // ---------------------------------------------------------------------------
 // Config & helpers
 // ---------------------------------------------------------------------------
 
-const API_BASE: string =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ((import.meta as any)?.env?.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
-  "http://localhost:8000";
+const RAW_API_URL = (
+  (import.meta as unknown as { env?: Record<string, string> })?.env?.["VITE_API_URL"]
+)?.replace(/\/$/, "");
+
+// Empty is "same origin", not "no backend": both Dockerfiles build the bundle
+// with VITE_API_URL empty on purpose, because nginx proxies /api to the API and
+// a same-origin bundle needs no CORS. Turning empty into an absolute URL would
+// send the deployed page to the visitor's own machine instead.
+//
+// A dev server has no such proxy, so a development build with nothing
+// configured keeps the API's default port as a convenience.
+const API_BASE: string = RAW_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 export const apiBaseUrl = API_BASE;
 
 export function shouldUseMock(): boolean {
-  // Allow forcing mocks via env; otherwise use mock only when no base URL.
-  const raw = (import.meta as unknown as { env?: Record<string, string> })?.env?.["VITE_API_URL"];
-  return !raw;
+  // Mocks are a development convenience for a dev server with no API behind it.
+  // A production build must always talk to the real API: serving fixtures is
+  // how a deployment looks healthy while showing numbers it did not compute.
+  return import.meta.env.DEV && !RAW_API_URL;
 }
 
 // ---------------------------------------------------------------------------

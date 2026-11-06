@@ -6,6 +6,7 @@ import {
   project,
   redis,
   service,
+  volume,
 } from "railway/iac";
 
 // Railway Infrastructure as Code: one file for the whole DemandIQ project.
@@ -20,6 +21,10 @@ const BRANCH = "main";
 export default defineRailway(() => {
   const db = postgres("postgres");
   const cache = redis("redis");
+  // Bundles live on a volume because a deploy replaces the container filesystem.
+  // A volume belongs to one service, so the service that owns it is the one the
+  // API fetches from.
+  const bundles = volume("bundles");
 
   // API. Root directory `backend` gives the build context backend/Dockerfile
   // expects. The start command replaces the image CMD because Railway terminates
@@ -43,6 +48,11 @@ export default defineRailway(() => {
       PORT: "8000",
       INSTALL_EXTRAS: "model ocr",
       MODEL_BUNDLE_PATH: "/app/artifacts/serving_bundle.joblib",
+      // The model service's volume is preferred when it is reachable; the export
+      // at MODEL_BUNDLE_PATH above stays the fallback, so a restart of either
+      // service cannot leave the API on stub forecasts. Model inference itself
+      // stays in this process — one bundle in, no extra hop per forecast.
+      MODEL_BUNDLE_URL: "http://model.railway.internal:9000/latest/serving_bundle.joblib",
       TRUSTED_PROXY_HEADERS: "true",
       LOG_LEVEL: "INFO",
       JOBS_ENABLED: "false",
@@ -67,7 +77,28 @@ export default defineRailway(() => {
     },
   });
 
+  // Model service. Serves the published export to the API over the private
+  // network and accepts new exports, so a retrain can be published without
+  // rebuilding the API image. INSTALL_TRAINING=1 switches its image from
+  // "serve bundles" to "serve bundles and run the pipeline here" (~1 GB more).
+  const model = service("model", {
+    source: github(REPO, { branch: BRANCH, rootDirectory: "model" }),
+    build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile.railway" },
+    healthcheck: "/healthz",
+    env: {
+      PORT: "9000",
+      BUNDLES_DIR: "/data/bundles",
+      INSTALL_TRAINING: "0",
+      // Needed to publish a bundle; until it is set, uploads are refused. The
+      // token itself is set in the dashboard, never committed.
+      BUNDLE_ADMIN_TOKEN: preserve(),
+      LOG_LEVEL: "INFO",
+    },
+    // Key is the mount path; the value attaches the volume declared above.
+    volumeMounts: { "/data": bundles },
+  });
+
   return project("demandiq", {
-    resources: [api, web, db, cache],
+    resources: [api, web, model, db, cache],
   });
 });

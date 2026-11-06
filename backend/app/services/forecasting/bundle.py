@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
+import tempfile
+import urllib.request
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -34,6 +37,16 @@ logger = logging.getLogger(__name__)
 
 BUNDLE_FORMAT = "demandiq-serving-bundle"
 BUNDLE_VERSION = 1
+
+# Where a bundle fetched from MODEL_BUNDLE_URL is cached. A module constant so a
+# test can point it at a temporary directory.
+REMOTE_BUNDLE_CACHE = Path(tempfile.gettempdir()) / "demandiq-serving" / "serving_bundle.joblib"
+
+# One attempt per process. _resolve_bundle_path runs on every forecast, so a
+# deployment whose model service is restarting must not pay a network timeout
+# per request; the shipped export answers meanwhile. Restarting the API (or
+# clear_bundle_cache) tries again.
+_remote_attempted = False
 
 
 def _load_bundle_file(path: Path) -> dict[str, Any] | None:
@@ -96,11 +109,66 @@ def _resolve_bundle_path() -> Path | None:
             " unless a default location has one",
             path,
         )
+    remote = _remote_bundle()
+    if remote is not None:
+        return remote
     for candidate in _DEFAULT_BUNDLE_CANDIDATES:
         path = Path(candidate)
         if path.exists():
             return path
     return None
+
+
+def _remote_bundle() -> Path | None:
+    """Download ``MODEL_BUNDLE_URL`` once and return the cached file.
+
+    The export baked into the image stays the fallback: this is a source for a
+    newer bundle, not a dependency. A failed or invalid download logs and
+    returns ``None`` so resolution falls through to discovery — a model service
+    that is restarting must not take the API down or quietly turn trained
+    forecasts into the stub.
+    """
+    global _remote_attempted
+    try:
+        url = (get_settings().model_bundle_url or "").strip()
+    except Exception:  # noqa: BLE001 - settings are import-safe but never required here
+        return None
+    target = REMOTE_BUNDLE_CACHE
+    if not url:
+        return None
+    if _remote_attempted:
+        # A later resolve is a cache lookup, not another request: the fetch is
+        # once per process on purpose (this runs on every forecast).
+        return target if target.exists() else None
+    _remote_attempted = True
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        request = urllib.request.Request(url, headers={"Accept": "application/octet-stream"})
+        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - operator-set URL
+            body = response.read()
+        # Replace atomically so a half-written file never reaches the loader.
+        partial = target.with_suffix(".joblib.part")
+        partial.write_bytes(body)
+        os.replace(partial, target)
+    except Exception as exc:  # noqa: BLE001 - any transport problem is the fallback case
+        logger.error(
+            "MODEL_BUNDLE_URL=%s could not be fetched (%s); using the export bundled with the image",
+            url,
+            exc,
+        )
+        return None
+
+    if _load_bundle_file(target) is None:
+        logger.error(
+            "MODEL_BUNDLE_URL=%s did not return a loadable serving bundle; "
+            "using the export bundled with the image",
+            url,
+        )
+        target.unlink(missing_ok=True)
+        return None
+    logger.info("serving bundle fetched from %s into %s", url, target)
+    return target
 
 
 def get_bundle() -> dict[str, Any] | None:
@@ -130,6 +198,8 @@ def get_bundle() -> dict[str, Any] | None:
 def clear_bundle_cache() -> None:
     """Reset the loader cache (used by tests and after re-export)."""
     _cached_load.cache_clear()
+    global _remote_attempted
+    _remote_attempted = False
 
 
 def bundle_details() -> dict[str, Any] | None:
