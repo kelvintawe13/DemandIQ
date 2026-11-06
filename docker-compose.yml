@@ -72,6 +72,15 @@ x-api-env: &api-env
   # origin and calls the API cross-origin.
   CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]}'
   JOBS_ENABLED: ${JOBS_ENABLED:-false}
+  # Vision OCR (optional). Tesseract reads printed glyphs; a handwriting photo is
+  # the case it cannot carry, so these turn the read over to an OpenAI-shaped
+  # chat-completions endpoint. Passed through here rather than only in
+  # `backend/.env` so the root `.env` — where the rest of the deployment's
+  # settings live — is enough to enable it. Empty means "not configured", and
+  # the local engine stays in charge, so a stock stack is unchanged.
+  OCR_VISION_URL: ${OCR_VISION_URL:-}
+  OCR_VISION_API_KEY: ${OCR_VISION_API_KEY:-}
+  OCR_VISION_MODEL: ${OCR_VISION_MODEL:-}
 
 x-api-common: &api-common
   <<: *api-build

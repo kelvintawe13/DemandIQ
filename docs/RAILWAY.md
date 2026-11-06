@@ -17,9 +17,18 @@ browser ──► web  (nginx + built SPA)          public: https://<web>.up.rai
 - **api** runs the FastAPI app from the trained serving bundle, with the schema migrated
   by `alembic upgrade head` before each deploy.
 
-Everything below is dashboard configuration. `railway.toml` / `railway.json` are **not
-used**: Railway has deprecated config-as-code and new services do not read it (hard
-cutoff 2026-12-01). Do not add one.
+## Two ways to configure it, and they must not be mixed
+
+- **`.railway/railway.ts`** — the project configuration, evaluated by the Railway CLI.
+  This is the supported form and the one in this repository: §9. It creates both
+  services, both data stores and every variable in one `apply`.
+- **The dashboard** — sections 1 to 5 below, step by step, for doing the same by hand.
+  Use one or the other for a given service, not both.
+
+`railway.toml` / `railway.json` are the retired per-service format. Railway stops reading
+them on **2026-12-01**, and new services cannot opt into them at all, so do not add one:
+it would be ignored without an error.
+
 
 ---
 
@@ -30,14 +39,21 @@ cutoff 2026-12-01). Do not add one.
 
    ```bash
    git add backend/artifacts/serving_bundle.joblib \
+           package-lock.json \
            .dockerignore \
            frontend/Dockerfile.railway \
            frontend/entrypoint.railway.sh \
            frontend/nginx.railway.conf.template \
+           .railway/railway.ts \
            docs/RAILWAY.md
    git commit -m "Add Railway deployment configuration"
    git push
    ```
+
+   `package-lock.json` is the root workspace lockfile: `frontend/Dockerfile.railway`
+   copies it and runs `npm ci`, and the web service builds from the git commit, so the
+   build fails without it. It used to be gitignored for this repository; it is not any
+   more.
 
    `backend/artifacts/serving_bundle.joblib` is a copy of
    `model/artifacts/runs/latest/serving_bundle.joblib`. It has to be copied because
@@ -315,3 +331,48 @@ serving mode at boot; the frontend prints its rendered upstream.
   for reads but only shares rate-limit/MFA/quota state through Redis.
 - There is no object storage configured, so uploaded images are processed and discarded.
   `OBJECT_STORE_*` would be the place to add durable storage.
+
+---
+
+## 9. Project configuration in code (`.railway/railway.ts`)
+
+The file in this repository declares the whole project, so one `apply` builds the same
+state as sections 1 to 3 done by hand:
+
+| Resource | What the file sets |
+|---|---|
+| `api` | GitHub source, root directory `backend`; builds `backend/Dockerfile`; the §2 start command; pre-deploy `alembic upgrade head`; healthcheck `/api/v1/health` at 300 s; the §2 variables |
+| `web` | GitHub source at the repository root; builds `frontend/Dockerfile.railway`; healthcheck `/healthz`; `API_UPSTREAM=api.railway.internal:8000`; `PORT=8080`; `VITE_API_URL` left unset |
+| `postgres` | Managed PostgreSQL; `api` reads `DATABASE_URL` from it |
+| `redis` | Managed Redis; `api` reads `REDIS_URL` from it |
+
+Prerequisites: `npm install` (the `railway` npm package here is the IaC SDK behind
+`railway/iac`, not the CLI) and Railway CLI 5.2 or newer
+(`npm i -g @railway/cli`, or `brew install railway`).
+
+```bash
+railway login
+railway link          # create the demandiq project, or select it
+npm run railway:plan  # review: services, databases and variables, no deletions
+npm run railway:apply # create them and start the first deploy
+```
+
+Two things the file cannot do:
+
+1. **`JWT_SECRET`.** It is `preserve()`, so the file never holds a secret and never
+   overwrites one. On a fresh project the API's first deploy stops, because
+   `APP_ENV=production` refuses a missing or weak secret. Set one on the API service
+   (**Variables → `JWT_SECRET`**, 32+ characters, e.g. `openssl rand -base64 48`), then
+   `railway redeploy --service api --yes`.
+2. **Generated domains and seeding.** §3 *Networking* and §4 apply as written; the file
+   does not create Railway-generated domains.
+
+Rules to keep in mind:
+
+- An apply is authoritative for the resources in the file: a service or database the file
+  no longer declares is deleted. Add a new resource to `resources` in the same change
+  that introduces it.
+- `railway config plan` refuses to run while any service is managed by `railway.toml` or
+  `railway.json`. There are none in this repository and none should be added.
+- Sections 2 and 3 and this file describe the same state. Edit one, then plan again,
+  rather than leaving the other stale.
