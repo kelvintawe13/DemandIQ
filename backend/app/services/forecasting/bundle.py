@@ -46,7 +46,13 @@ REMOTE_BUNDLE_CACHE = Path(tempfile.gettempdir()) / "demandiq-serving" / "servin
 # deployment whose model service is restarting must not pay a network timeout
 # per request; the shipped export answers meanwhile. Restarting the API (or
 # clear_bundle_cache) tries again.
+#
+# ``_remote_path`` is the outcome of that attempt, and only that outcome is
+# served: a file left in the cache by an earlier process is *not* a bundle we
+# just fetched, and serving it would mean answering from a stale model whose
+# source we could not reach.
 _remote_attempted = False
+_remote_path: Path | None = None
 
 
 def _load_bundle_file(path: Path) -> dict[str, Any] | None:
@@ -133,7 +139,7 @@ def _remote_bundle() -> Path | None:
     that is restarting must not take the API down or quietly turn trained
     forecasts into the stub.
     """
-    global _remote_attempted
+    global _remote_attempted, _remote_path
     try:
         url = (get_settings().model_bundle_url or "").strip()
     except Exception:  # noqa: BLE001 - settings are import-safe but never required here
@@ -142,14 +148,18 @@ def _remote_bundle() -> Path | None:
     if not url:
         return None
     if _remote_attempted:
-        # A later resolve is a cache lookup, not another request: the fetch is
-        # once per process on purpose (this runs on every forecast).
-        return target if target.exists() else None
+        # A later resolve is a lookup of this process's outcome, not another
+        # request: the fetch is once per process on purpose (this runs on every
+        # forecast).
+        return _remote_path
     _remote_attempted = True
+    _remote_path = None
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        request = urllib.request.Request(url, headers={"Accept": "application/octet-stream"})
+        request = urllib.request.Request(  # noqa: S310 - operator-set URL
+            url, headers={"Accept": "application/octet-stream"}
+        )
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - operator-set URL
             body = response.read()
         # Replace atomically so a half-written file never reaches the loader.
@@ -173,6 +183,7 @@ def _remote_bundle() -> Path | None:
         target.unlink(missing_ok=True)
         return None
     logger.info("serving bundle fetched from %s into %s", url, target)
+    _remote_path = target
     return target
 
 
@@ -203,8 +214,9 @@ def get_bundle() -> dict[str, Any] | None:
 def clear_bundle_cache() -> None:
     """Reset the loader cache (used by tests and after re-export)."""
     _cached_load.cache_clear()
-    global _remote_attempted
+    global _remote_attempted, _remote_path
     _remote_attempted = False
+    _remote_path = None
 
 
 def bundle_details() -> dict[str, Any] | None:

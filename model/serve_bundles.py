@@ -84,13 +84,15 @@ def validate_bundle(body: bytes) -> dict[str, Any]:
         raise ValueError("joblib is not installed in this image") from exc
     try:
         bundle = joblib.load(io.BytesIO(body))
-    except Exception as exc:  # noqa: BLE001 - any decode failure is a bad upload
+    except Exception as exc:
         raise ValueError(f"not a joblib file: {exc}") from exc
     if not isinstance(bundle, dict) or bundle.get("format") != BUNDLE_FORMAT:
         raise ValueError(f"not a {BUNDLE_FORMAT} export")
     version = int(bundle.get("bundle_version", 0) or 0)
     if version < BUNDLE_VERSION:
-        raise ValueError(f"bundle_version {version} is older than the API serves ({BUNDLE_VERSION})")
+        raise ValueError(
+            f"bundle_version {version} is older than the API serves ({BUNDLE_VERSION})"
+        )
     model = bundle.get("model") or {}
     return {
         "bundle_version": version,
@@ -194,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     # -- routes -----------------------------------------------------------
-    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_GET(self) -> None:
         path = unquote(urlparse(self.path).path).rstrip("/") or "/"
         if path == "/healthz":
             latest = latest_path()
@@ -236,7 +238,7 @@ class Handler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
-    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_POST(self) -> None:
         path = unquote(urlparse(self.path).path).rstrip("/")
         if path != "/bundles":
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -273,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         self._json(HTTPStatus.CREATED, published)
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
+    def log_message(self, fmt: str, *args: Any) -> None:
         LOG.info("%s - %s", self.address_string(), fmt % args)
 
 
@@ -292,8 +294,11 @@ def main() -> int:
     if latest.exists():
         LOG.info("serving %s (%s bytes) on :%d", latest, latest.stat().st_size, port)
     else:
-        LOG.warning("no bundle on the volume yet; :%d is up, uploads enabled=%s", port,
-                    bool(os.environ.get("BUNDLE_ADMIN_TOKEN")))
+        LOG.warning(
+            "no bundle on the volume yet; :%d is up, uploads enabled=%s",
+            port,
+            bool(os.environ.get("BUNDLE_ADMIN_TOKEN")),
+        )
     LOG.info("bundles dir %s, %d stored export(s)", bundles_dir(), len(index()))
 
     def _stop(signum: int, _frame: Any) -> None:

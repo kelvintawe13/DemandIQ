@@ -146,6 +146,22 @@ def test_an_unreachable_source_with_no_fallback_is_the_stub(
     assert serving_status()["path"] is None
 
 
+def test_a_stale_cache_is_not_served_when_the_source_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A cache file left by an earlier process is not a bundle this process
+    # fetched. Serving it would answer from a model whose source we cannot reach
+    # and call it "trained from the volume".
+    _write_bundle(tmp_path / "cache" / "serving_bundle.joblib", version="stale-1")
+    shipped = _write_bundle(tmp_path / "image" / "serving_bundle.joblib", version="shipped-1")
+    _isolate(monkeypatch, tmp_path, "http://127.0.0.1:9/serving_bundle.joblib", shipped)
+
+    status = serving_status()
+
+    assert status["path"] == str(shipped)
+    assert status["version"] == "shipped-1"
+
+
 def test_a_bad_download_is_rejected_and_discarded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -157,9 +173,7 @@ def test_a_bad_download_is_rejected_and_discarded(
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{httpd.server_address[1]}/serving_bundle.joblib"
     try:
-        shipped = _write_bundle(
-            tmp_path / "image" / "serving_bundle.joblib", version="shipped-1"
-        )
+        shipped = _write_bundle(tmp_path / "image" / "serving_bundle.joblib", version="shipped-1")
         cache = _isolate(monkeypatch, tmp_path, url, shipped)
 
         status = serving_status()

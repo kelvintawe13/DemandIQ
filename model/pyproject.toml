@@ -29,6 +29,11 @@ training = [
     "xgboost>=2.0.0",
     "scikit-learn>=1.3.0",
     "shap>=0.43.0",
+    # The pipeline writes its stage artifacts as parquet and the export reads
+    # predictions back. Colab preinstalls pyarrow, which is why this was missing
+    # here: a clean install (CI, the model service) failed at the first
+    # to_parquet or read_parquet instead.
+    "pyarrow>=14.0.0",
 ]
 dev = [
     "pytest>=7.4.0",

@@ -44,6 +44,8 @@ it would be ignored without an error.
            frontend/Dockerfile.railway \
            frontend/entrypoint.railway.sh \
            frontend/nginx.railway.conf.template \
+           model/Dockerfile.railway model/.dockerignore model/serve_bundles.py \
+           scripts/publish_bundle.sh .github/workflows/publish-bundle.yml \
            .railway/railway.ts \
            docs/RAILWAY.md
    git commit -m "Add Railway deployment configuration"
@@ -116,6 +118,7 @@ resolved at deploy time, so the password never appears in this file or in the re
 | `PORT` | `8000` | Pinned so the private-network port the frontend dials is deterministic. |
 | `INSTALL_EXTRAS` | `model ocr` | **Build argument** (declared as `ARG` in the Dockerfile, so Railway passes it at build time). `model` installs lightgbm/pandas/joblib so the bundle can actually run; `ocr` installs pytesseract **and**, via the Dockerfile's runtime stage, the `tesseract-ocr` OS packages — without them photo ingestion raises `ImportError`. |
 | `MODEL_BUNDLE_PATH` | `/app/artifacts/serving_bundle.joblib` | Explicit, so a bundle that fails to load fails the healthcheck instead of silently falling back to the stub. |
+| `MODEL_BUNDLE_URL` | *(optional)* `http://model.railway.internal:9000/latest/serving_bundle.joblib` | Only with the model service in §10. It is fetched once at startup and preferred over `MODEL_BUNDLE_PATH`, which stays the fallback if the fetch fails. Leave it unset to serve the export baked into the image. |
 | `CORS_ORIGINS` | `["https://<web>.up.railway.app"]` | Not strictly needed while the proxy is in place (same origin), but it is the correct value if you ever call the API directly. Must be **JSON**, not comma-separated. |
 | `TRUSTED_PROXY_HEADERS` | `true` | Railway's edge terminates TLS and the container port is not directly reachable, so `X-Forwarded-For` is trustworthy — rate limiting then buckets real client IPs instead of putting everyone in one bucket. |
 | `LOG_LEVEL` | `INFO` | Boot logs report the serving mode. |
@@ -323,7 +326,8 @@ serving mode at boot; the frontend prints its rendered upstream.
 
 ## 8. Cost and scaling notes
 
-- Two services + Postgres + Redis is four billable resources. The API image is the heavy
+- Two services + Postgres + Redis is four billable resources (five with the model
+  service in §10, whose image is small: roughly 600 MB serving-only). The API image is the heavy
   one: `lightgbm` + `pandas` + Tesseract is roughly 400–600 MB, and the first build takes
   several minutes. Subsequent builds reuse the dependency layer unless
   `pyproject.toml` changes.
@@ -343,6 +347,7 @@ state as sections 1 to 3 done by hand:
 |---|---|
 | `api` | GitHub source, root directory `backend`; builds `backend/Dockerfile`; the §2 start command; pre-deploy `alembic upgrade head`; healthcheck `/api/v1/health` at 300 s; the §2 variables |
 | `web` | GitHub source at the repository root; builds `frontend/Dockerfile.railway`; healthcheck `/healthz`; `API_UPSTREAM=api.railway.internal:8000`; `PORT=8080`; `VITE_API_URL` left unset |
+| `model` | GitHub source, root directory `model`; builds `model/Dockerfile.railway`; healthcheck `/healthz`; volume `bundles` at `/data`; `INSTALL_TRAINING=0`; `BUNDLE_ADMIN_TOKEN` preserved |
 | `postgres` | Managed PostgreSQL; `api` reads `DATABASE_URL` from it |
 | `redis` | Managed Redis; `api` reads `REDIS_URL` from it |
 
@@ -357,8 +362,11 @@ npm run railway:plan  # review: services, databases and variables, no deletions
 npm run railway:apply # create them and start the first deploy
 ```
 
-Two things the file cannot do:
+Things the file cannot do:
 
+0. **`BUNDLE_ADMIN_TOKEN`** (only with the model service in §10). It is `preserve()` and
+   the service refuses uploads until it is set, so a first apply leaves the service
+   serving and publishing disabled. Set it on the model service, then publish.
 1. **`JWT_SECRET`.** It is `preserve()`, so the file never holds a secret and never
    overwrites one. On a fresh project the API's first deploy stops, because
    `APP_ENV=production` refuses a missing or weak secret. Set one on the API service
@@ -376,3 +384,106 @@ Rules to keep in mind:
   `railway.json`. There are none in this repository and none should be added.
 - Sections 2 and 3 and this file describe the same state. Edit one, then plan again,
   rather than leaving the other stale.
+
+---
+
+## 10. Optional: the model service
+
+Nothing here is required to serve the trained model. The API loads the export baked into
+its image (`backend/artifacts/serving_bundle.joblib`) and runs LightGBM inference
+in-process; `serving.mode: trained` in `/api/v1/health` is the proof, with or without this
+service.
+
+Add the service when a published bundle should not need an API rebuild:
+
+| Settings → | Value |
+|---|---|
+| Source → Root Directory | `model` |
+| Source → Branch | `main` |
+| Build → Dockerfile Path | `Dockerfile.railway` |
+| Deploy → Healthcheck Path | `/healthz` |
+| Deploy → Healthcheck Timeout | `120` |
+| Volume | mount at `/data` |
+
+| Variable | Value | Why |
+|---|---|---|
+| `PORT` | `9000` | Matches the private-network port in `MODEL_BUNDLE_URL`. |
+| `BUNDLES_DIR` | `/data/bundles` | The volume mount plus a subdirectory, so a volume can be reused for other things. |
+| `BUNDLE_ADMIN_TOKEN` | a fresh random string | Required to publish. Until it is set, `POST /bundles` answers `503` and the service only serves. |
+| `INSTALL_TRAINING` | `0` | **Build argument.** `0` installs what it takes to *read* a bundle. `1` also installs the training extras (lightgbm, catboost, xgboost, scikit-learn, shap) so the pipeline can run inside the service — roughly 1 GB more, minutes longer to build. |
+
+What it does:
+
+- `GET /healthz` — liveness, plus whether a bundle is on the volume.
+- `GET /latest/serving_bundle.joblib` — the export the API fetches.
+- `GET /bundles` — every export ever published (they are kept under `exports/`).
+- `POST /bundles` — validate a `serving_bundle.joblib` and make it latest. The body is
+the file; the header is `X-Bundle-Token`. A file that is not a demandiq bundle, or one
+older than the API serves, is rejected with `422` before it reaches the volume, because
+the API treats an unloadable bundle at a configured source as a configuration error.
+
+### Publishing a re-export
+
+`scripts/publish_bundle.sh` uploads a bundle and then reads it back, so a green
+run means the service is serving exactly the bytes that were sent, not merely that
+the upload answered `201`:
+
+```bash
+MODEL_SERVICE_URL="https://<model>.up.railway.app" \
+BUNDLE_ADMIN_TOKEN="<the service variable>" \
+  bash scripts/publish_bundle.sh backend/artifacts/serving_bundle.joblib
+
+# the API fetches once per boot, so roll it out explicitly
+railway redeploy --service api --yes
+```
+
+Exit codes: `1` configuration (no URL or token, missing file, unreachable service),
+`2` the service rejected the upload (`401`/`503` token, `422` not a bundle), `3` the
+service is serving different bytes than were sent.
+
+### Publishing from CI
+
+`.github/workflows/publish-bundle.yml` retrains with the same arguments as
+`make train-model` (`model/data/recruit` is committed, so the inputs match the
+recorded run), exports the bundle, publishes it, and keeps the export as a build
+artifact. It is manual only — **Actions → Publish model bundle → Run workflow** —
+because it replaces the model the API serves; a push should not do that.
+
+Configure two things once, under **Settings → Secrets and variables → Actions**:
+
+| Kind | Name | Value |
+|---|---|---|
+| Variable | `MODEL_SERVICE_URL` | The model service's public URL. |
+| Secret | `BUNDLE_ADMIN_TOKEN` | The same string as the service's `BUNDLE_ADMIN_TOKEN`. |
+
+The workflow checks both before training starts and fails there rather than after
+ten minutes of CPU. It does **not** redeploy the API: run
+`railway redeploy --service api --yes` afterwards, which is also the rollback
+boundary — until then the previous export keeps answering, and every published
+export stays on the volume (`GET /bundles`).
+
+It also does not touch `backend/artifacts/serving_bundle.joblib`, the fallback in
+the API image. When a new model should be the fallback too, run `make train-model`
+locally, copy `model/artifacts/runs/latest/serving_bundle.joblib` over it, and
+commit — otherwise the fallback stays at whatever was last committed.
+
+To retrain inside the service, set `INSTALL_TRAINING=1`, redeploy it, and run the
+pipeline there with the same arguments as `make train-model`:
+
+```bash
+python -m diq_model.train train --data-root data/recruit \
+  --checkpoints /data/runs/latest --test-start 2017-02-01 --seed 42 --force
+python scripts/export_serving_bundle.py --artifacts /data/runs/latest
+curl -X POST http://127.0.0.1:9000/bundles -H "X-Bundle-Token: $BUNDLE_ADMIN_TOKEN" \
+  --data-binary @/data/runs/latest/serving_bundle.joblib
+```
+
+Failure behaviour, which is what makes this safe to add:
+
+- The API fetches once at startup. If the model service is down, the export in the API
+  image answers instead and `/api/v1/health` stays `200` `trained`; the boot log records
+  the failed fetch. A model-service restart cannot take forecasting down.
+- A cache file from an earlier boot is not treated as a fetch. Only a bundle this process
+  actually downloaded is served, so a stale file cannot masquerade as the current model.
+- Inference does not go through the model service: it serves a file, the API loads it.
+  There is no extra network hop per forecast.
