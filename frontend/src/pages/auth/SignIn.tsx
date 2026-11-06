@@ -15,7 +15,7 @@ import { GoogleButton } from '../../components/auth/GoogleButton';
 import { isGoogleConfigured } from '../../lib/google';
 import { Rise } from '../../components/ui/Rise';
 import { DashboardArt } from '../../components/illustrations/AuthArt';
-import { demoAccounts, findDemoAccount } from '../../data/demoAccount';
+import { findDemoAccount } from '../../data/demoAccount';
 import type { DemoAccount } from '../../data/demoAccount';
 import { api, ApiException, setToken } from '../../api/client';
 import { useToast } from '../../contexts/ToastContext';
@@ -270,24 +270,6 @@ export function SignIn({
     void signIn(email, password);
   };
 
-  const adminSeat = demoAccounts.find((account) => account.id === 'admin');
-
-  const handleAdminQuickFill = () => {
-    if (!adminSeat) return;
-    setEmail(adminSeat.email);
-    setPassword(adminSeat.password);
-    setFieldErrors({});
-    setGeneralError(undefined);
-    setReference(undefined);
-    // A captcha cannot be completed programmatically, so fill the fields and
-    // let the person finish the check instead of sending a login that 401s.
-    if (isTurnstileEnabled() && !captchaToken) {
-      setCaptchaError('Complete the human check to continue.');
-      return;
-    }
-    void signIn(adminSeat.email, adminSeat.password);
-  };
-
   return (
     <AuthLayout
       art={<DashboardArt className="h-auto w-[300px]" />}
@@ -409,18 +391,6 @@ export function SignIn({
           {!loading && <ArrowRightIcon className="h-4 w-4" strokeWidth={2} />}
         </button>
 
-        <div className="flex items-center justify-center gap-1.5 text-micro text-slate-500">
-          <span>Quick fill</span>
-          <button
-            type="button"
-            onClick={handleAdminQuickFill}
-            disabled={loading}
-            title="Sign in with the admin account"
-            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700 transition-colors duration-150 ease-out hover:border-brand-300 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
-            
-            admin
-          </button>
-        </div>
       </form>
       </Rise>
 
