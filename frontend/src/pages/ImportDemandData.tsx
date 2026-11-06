@@ -36,7 +36,7 @@ interface UploadRow {
   status: string;
   row_count: number;
   error_count: number;
-  /** The original photo is stored server-side and can be shown again. */
+  /** Set only for uploads whose photo an earlier version stored server-side. */
   has_source?: boolean;
   created_at: string | null;
 }
@@ -68,6 +68,10 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
   const [activeTabId, setActiveTabId] = useState('manual');
   const [imageName, setImageName] = useState<string>();
   const [jobId, setJobId] = useState<string | null>(null);
+  /* The operator's own copy of the photo, kept only for this review. The API
+     stores no image, so this object URL is the only thing the rows can be
+     checked against; it is revoked as soon as the selection is cleared. */
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   // uploads list — global loading: keep stale data visible while refreshing
   const [uploads, setUploads] = useState<UploadRow[]>([]);
@@ -294,6 +298,10 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
   const clearImageSelection = () => {
     setJobId(null);
     setImageName(undefined);
+    setPhotoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   };
 
   /**
@@ -357,7 +365,7 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
     const id = jobId;
     setConfirming({
       title: `Discard ${imageName ?? 'this upload'}?`,
-      body: 'The staged photo and the rows read from it are discarded. Nothing has been imported yet, and this cannot be undone.',
+      body: 'The rows read from this photo are discarded, and the copy of the image in this browser is released. Nothing has been imported yet, and this cannot be undone.',
       confirmLabel: 'Discard upload',
       run: () => void performImageCancel(id),
     });
@@ -376,9 +384,16 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
     fetchUploads(currentCursor, { force: true });
   };
 
-  const handleImageUploaded = (newJobId: string, fileName: string) => {
+  const handleImageUploaded = (newJobId: string, fileName: string, file?: File) => {
     setJobId(newJobId);
     setImageName(fileName);
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setPhotoUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    }
     // Refresh the list so the new job appears. Forced, because a job we just
     // created has to show up even if a background fetch is still open.
     fetchUploads(currentCursor, { force: true });
@@ -606,7 +621,7 @@ export function ImportDemandData(_props: ImportDemandDataProps) {
         {activeTabId === 'image' && (
           <>
             <UploadImagePanel imageName={imageName} jobId={jobId} onUploaded={handleImageUploaded} />
-            <PreviewPanel imageName={imageName} jobId={jobId} onClear={handleImageCancelled} />
+            <PreviewPanel imageName={imageName} jobId={jobId} imageUrl={photoUrl} onClear={handleImageCancelled} />
           </>
         )}
         {activeTabId === 'excel' && <ExcelCsvTab />}

@@ -38,6 +38,12 @@ interface ExtractedRow {
 interface PreviewPanelProps {
   imageName?: string;
   jobId?: string | null;
+  /**
+   * The browser's own copy of the uploaded photo, owned by the parent. The
+   * server stores no image, so this is the only source for highlighting rows
+   * in the current review; without it the panel shows the rows alone.
+   */
+  imageUrl?: string | null;
   onClear?: () => void;
 }
 
@@ -164,7 +170,7 @@ function boxStyle(box?: number[] | null): CSSProperties | undefined {
   };
 }
 
-export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
+export function PreviewPanel({ imageName, jobId, imageUrl, onClear }: PreviewPanelProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [imported, setImported] = useState(false);
   const { toast } = useToast();
@@ -184,7 +190,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
   const [editingRows, setEditingRows] = useState<EditingRow[]>([]);
   const [commitLoading, setCommitLoading] = useState(false);
   const [commitError, setCommitError] = useState<{ message: string; reference?: string | null } | null>(null);
-  /** The stored photo, so rows can be checked against what they were read from. */
+  /** The photo the rows are checked against, from the parent or a stored upload. */
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   /** The row the operator is on, so its highlights are the pointed-at ones. */
   const [activeRow, setActiveRow] = useState<number | null>(null);
@@ -298,11 +304,16 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  // The stored photo, fetched separately from the rows: it is the thing the
-  // operator is asked to check them against, and a review without it is just
-  // another table. Fetching happens on the job id and nowhere else, so editing a
-  // row never re-downloads the image.
+  // The photo the operator checks the rows against, and a review without it is
+  // just another table. The current upload path stores nothing, so the parent
+  // passes the file's object URL; the fetch below is for uploads made by an
+  // earlier version, whose bytes are still readable. Either way the URL only
+  // changes with the job id, so editing a row never reloads an image.
   useEffect(() => {
+    if (imageUrl) {
+      setPhotoUrl(imageUrl);
+      return;
+    }
     if (!jobId) {
       setPhotoUrl(null);
       return;
@@ -327,7 +338,7 @@ export function PreviewPanel({ imageName, jobId, onClear }: PreviewPanelProps) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [jobId]);
+  }, [jobId, imageUrl]);
 
   const handleCommit = async () => {
     if (!jobId) return;

@@ -1,10 +1,12 @@
-"""Keeping the original photo with the upload that read it.
+"""What happens to the original photo of an image upload.
 
-Image ingestion used to keep only the parsed rows, so the review step ("check
-each row against the photo") could not actually be done once the upload
-finished: the photo lived in the browser tab, and was gone on reload. These
-tests pin the replacement — the bytes are stored on the upload, served back only
-to its own workspace, and listed as a flag rather than as bytes.
+The current policy is that nothing of the image is kept: the route reads the
+page, stages the rows, and drops the bytes, so the review screen shows the
+browser's own copy of the file. Two of these tests pin that. The rest pin the
+reading side of the older behaviour, where a photo stored on the upload is
+served back only to its own workspace and listed as a flag rather than as
+bytes — those rows still exist in databases written before the change, and the
+endpoints must keep handling them honestly.
 
 The database is mocked, matching ``test_ingest.py``: what is under test here is
 the route contract (what is stored, what is served, who may read it), not SQL.
@@ -90,8 +92,8 @@ def _client(ws: Workspace, user: User, db: MagicMock) -> TestClient:
     return TestClient(app)
 
 
-def test_image_upload_keeps_the_original_bytes() -> None:
-    """The photo is stored on the upload, with the type sniffed from the bytes."""
+def test_image_upload_stores_no_bytes_of_the_photo(monkeypatch) -> None:
+    """The rows are staged and the image is dropped, never written to the row."""
     ws = _make_workspace()
     user = _make_user(ws.id)
     stored: list[IngestUpload] = []
@@ -99,6 +101,19 @@ def test_image_upload_keeps_the_original_bytes() -> None:
     db = MagicMock()
     db.add.side_effect = lambda obj: stored.append(obj) if isinstance(obj, IngestUpload) else None
     db.flush = MagicMock()
+
+    # OCR itself is not what this test is about, and running Tesseract on a
+    # 1x1 PNG would only measure the engine.
+    monkeypatch.setattr(
+        "app.routers.ingest.preview_for_image",
+        lambda data, filename, reporting_year=None: {
+            "headers": ["date", "demand_qty"],
+            "rows": [{"date": "2026-01-01", "demand_qty": 5}],
+            "row_count": 1,
+            "engine": "tesseract",
+            "reporting_year": reporting_year,
+        },
+    )
 
     client = _client(ws, user, db)
     resp = client.post(
@@ -109,9 +124,11 @@ def test_image_upload_keeps_the_original_bytes() -> None:
 
     assert len(stored) == 1
     upload = stored[0]
-    assert upload.source_image == _ONE_PIXEL_PNG
-    # From the sniffed format, not the multipart part's declared type.
-    assert upload.source_mime == "image/png"
+    assert upload.source_image is None
+    assert upload.source_mime is None
+    # The rows are the output that survives, so the upload is still reviewable.
+    assert upload.preview is not None
+    assert upload.row_count == 1
 
 
 def test_source_endpoint_serves_the_stored_photo() -> None:

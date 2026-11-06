@@ -1,12 +1,16 @@
 """Photo retention for image ingestion.
 
-The Privacy Policy promises that a photo is deleted 30 days after upload. An
-upload's parsed rows are the operator's demand history and must survive; only
-the image itself is personal data, so retention clears ``source_image`` and
-``source_mime`` and leaves the upload and its observations in place.
+Photos are no longer stored: ``POST /ingest/image`` reads the page and drops the
+bytes, and the review screen shows the browser's own copy. This module exists
+for the rows written by earlier versions, where a photo was kept in
+``ingest_uploads.source_image``. An upload's parsed rows are the operator's
+demand history and must survive; only the image itself is personal data, so
+retention clears ``source_image`` and ``source_mime`` and leaves the upload and
+its observations in place. On an installation that never stored a photo the
+job finds nothing to clear and reports zero.
 
 Deleting the import remains the immediate path: ``DELETE /ingest/uploads/{id}``
-removes the row (and therefore the bytes) at once.
+removes the row (and anything attached to it) at once.
 """
 
 from __future__ import annotations

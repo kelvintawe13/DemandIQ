@@ -9,7 +9,12 @@ import { api, ApiException } from '../api/client';
 interface UploadImagePanelProps {
   imageName?: string;
   jobId?: string | null;
-  onUploaded: (jobId: string, fileName: string) => void;
+  /**
+   * The file is handed to the parent as well as the job id: the server does not
+   * store the photo, so this is the only copy the review screen can show next
+   * to the rows it read.
+   */
+  onUploaded: (jobId: string, fileName: string, file?: File) => void;
 }
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -107,7 +112,7 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
         form.append('reporting_year', String(year));
       }
       const res = await api.postForm<{ job_id: string; status: string; filename: string }>('/api/v1/ingest/image', form);
-      onUploaded(res.job_id, file.name);
+      onUploaded(res.job_id, file.name, file);
       /* No row count is claimed here on purpose. `POST /ingest/image` returns
          only a job id; the extracted rows are fetched separately by
          PreviewPanel, which reports how many actually came back. This toast
@@ -180,8 +185,8 @@ export function UploadImagePanel({ imageName, jobId, onUploaded }: UploadImagePa
               </span>
             </label>
             <p className="mt-1.5 text-caption leading-relaxed text-slate-500 dark:text-slate-400">
-              Photos are read on DemandIQ's own server, deleted with the import they belong to, and removed
-              automatically once they are 30 days old.
+              Photos are read on DemandIQ's own server and are not stored there. This browser keeps your copy
+              only while the review is open, and nothing of the image is saved with the rows.
             </p>
           </div>
         </div>

@@ -45,7 +45,6 @@ from app.services.ingestion.file import (
 )
 from app.services.ingestion.image import (
     ImageValidationError,
-    image_mime_type,
     preview_for_image,
     validate_image_upload,
 )
@@ -717,6 +716,13 @@ async def upload_image(
 ) -> dict[str, Any]:
     """Run OCR on an uploaded image and stage reviewable rows.
 
+    The photo is read here and then discarded: nothing of the image is written
+    to the database. The review screen shows it from a browser-held copy of the
+    file the operator picked, so the server keeps no personal data from a page
+    that may carry a customer's name. ``source_image`` therefore stays empty for
+    every upload made since this policy, while remaining readable for any photo
+    stored by an earlier version until retention clears it.
+
     ``reporting_year`` is the year the operator says the page belongs to, used
     only for dates written without one ("12 Oct"). Without it those rows would
     be dated in the current year, which turns last year's page into this year's
@@ -735,7 +741,7 @@ async def upload_image(
     # Rejecting here keeps non-images out of the review queue and out of the
     # remote OCR service, instead of returning a job that can only fail later.
     try:
-        info = validate_image_upload(data, file.filename)
+        validate_image_upload(data, file.filename)
     except ImageValidationError as exc:
         raise _error(400, "invalid_image", str(exc), field="file") from None
 
@@ -756,12 +762,10 @@ async def upload_image(
         row_count=preview.get("row_count", 0),
         error_count=0,
         preview=preview,
-        # Keep the photo itself: the review screen asks the operator to check
-        # every row against it, and without a stored copy that check ends when
-        # the browser tab does. The MIME type comes from the bytes, never from
-        # the client's Content-Type.
-        source_image=data,
-        source_mime=image_mime_type(info.format),
+        # Deliberately no source_image/source_mime: the bytes are used to read
+        # the page and then dropped. The operator checks the rows against the
+        # file their browser still holds, which is why no photo needs to be
+        # retained, erased on a schedule, or exposed by the source endpoint.
         created_at=datetime.datetime.now(datetime.UTC),
     )
     db.add(upload)
@@ -1153,10 +1157,11 @@ def get_upload_source(
 ) -> Response:
     """Return the original photo an image upload was read from.
 
-    This is what makes an OCR row checkable after the fact: the preview holds
-    the parsed values, and only the photo says whether they are right. Uploads
-    from before photos were kept, and non-image uploads, have nothing to serve
-    and answer 404 rather than an empty image the browser would render broken.
+    Only uploads made by an earlier version kept their bytes; the current path
+    stores none, so a recent upload answers 404 ``no_source`` and the review
+    screen falls back to the copy held in the browser. Non-image uploads have
+    nothing to serve either, and 404 is honest where an empty image the browser
+    would render broken is not.
 
     Read access is the router's ingest permission plus the workspace check — the
     same boundary as the rows themselves, since the photo contains them.
@@ -1192,9 +1197,11 @@ def retry_upload(
 ) -> dict[str, Any]:
     """Read a stored original again, replacing the staged rows.
 
-    Only possible for uploads whose bytes were kept, which today means photos.
-    A spreadsheet's parsed result is what is stored, not the sheet, so the
-    caller is told ``no_source`` and can fall back to picking the file again.
+    Only possible for uploads whose bytes were kept, which now means photos
+    stored by an earlier version — current uploads keep none, so the caller is
+    told ``no_source`` and re-picks the file instead (the ingestion screen's
+    retry action does exactly that). A spreadsheet's parsed result is what is
+    stored, not the sheet.
     """
     upload: IngestUpload | None = db.get(IngestUpload, upload_id)
     if upload is None or upload.workspace_id != current_user.workspace_id:
