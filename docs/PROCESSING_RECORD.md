@@ -1,7 +1,7 @@
 # Record of personal data processing — DemandIQ
 
 Kept under Article 17 of Law No. 058/2021 of 13/10/2021 relating to the protection
-of personal data and privacy. Last reviewed 29 October 2026.
+of personal data and privacy. Last reviewed 7 November 2026.
 
 ## Controller and contact
 
@@ -18,7 +18,7 @@ of personal data and privacy. Last reviewed 29 October 2026.
 | --- | --- | --- | --- | --- |
 | Account and workspace | Owners, administrators, data clerks, analysts, viewers | Name, email, hashed password, role, workspace, session and device records | Sign-in, five seats inside one workspace, session revocation | Until the account is deleted |
 | Demand records | None (business figures, not people) | Date, quantity, channel, location | Forecast the next day's demand and show a range | Until the import or account is deleted |
-| Imported files and photos | Anyone whose handwriting appears on an uploaded log | The image itself, its MIME type, the rows read from it | Read a paper log into reviewable rows | Photo cleared 30 days after upload by the `photo_retention` job; rows stay with the import |
+| Imported files and photos | Anyone whose handwriting appears on an uploaded log | The rows read from the image (date, quantity, channel); the image itself is not stored | Read a paper log into reviewable rows | The image is read on the server and discarded; the browser holds the operator's own copy for the review only. Rows stay with the import. Photos stored by an earlier version were cleared 30 days after upload by the `photo_retention` job. |
 | Device and connector keys | Workspace staff | Per-device key, location mapping | Attribute a record to a location without a shared password | Until revoked |
 | Research data | None — no participant has taken part | — | — | — |
 
@@ -47,7 +47,8 @@ of personal data and privacy. Last reviewed 29 October 2026.
 Access, portability, erasure and rectification are handled through the Privacy
 Policy in the app and by email to the contact above. Account deletion runs
 `DELETE /me/account`; a full copy of demand records is sent by email within 30
-days. Photo deletion earlier than 30 days is also by email.
+days. No photo is retained, so there is no stored image to erase; deleting an
+import removes the rows it wrote.
 
 ## Children
 

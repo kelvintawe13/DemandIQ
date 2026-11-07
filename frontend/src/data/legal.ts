@@ -17,7 +17,7 @@ export const legalDocuments: LegalDocument[] = [
   id: 'privacy',
   label: 'Privacy Policy and Terms of Use',
   title: 'DemandIQ Privacy Policy and Terms of Use',
-  updated: 'October 29, 2026',
+  updated: 'November 7, 2026',
   summary:
   'DemandIQ is a research prototype built by Kelvin Tawe as a capstone project at African Leadership University, Kigali, Rwanda. It helps small food businesses forecast daily demand. Questions about this page: k.tawe@alustudent.com.',
   sections: [
