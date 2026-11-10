@@ -26,6 +26,8 @@ backend/migrations/__pycache__/
 
 # Model virtual environment and caches
 model/.venv/
+# Throwaway env for the clean-room reproduction run
+model/.venv-clean/
 model/.pytest_cache/
 model/artifacts/
 model/data/          # Recruit & Urban-Waste dataset CSVs (external data)
@@ -37,6 +39,7 @@ model/tests/__pycache__/
 docker-compose.override.yml
 
 # Environment variables (local development)
+.env
 backend/.env
 frontend/.env
 
@@ -52,5 +55,6 @@ frontend/.env
 dist/
 build/
 
-# Misc
-package-lock.json
+# package-lock.json is committed on purpose: frontend/Dockerfile.railway copies it
+# and runs `npm ci`, so a build from a git commit (Railway) has no lockfile to use
+# if this file is ignored.
